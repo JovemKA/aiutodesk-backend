@@ -1,31 +1,31 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import databaseConfig from './config/database.config';
-import jwtConfig from './config/jwt.config';
-import appConfig from './config/app.config';
-import { CoreModule } from './core/core.module';
-import { DatabaseModule } from './infrastructure/database/database.module';
-
-import { TenantsModule } from '@modules/tenants/tenants.module';
-import { UsersModule } from '@modules/users/users.module';
-import { TicketsModule } from '@modules/tickets/tickets.module';
-import { AuthModule } from '@modules/auth/auth.module';
-import { KnowledgeModule } from '@modules/knowledge/knowledge.module';
-import { DepartmentsModule } from '@modules/departments/departments.module';
+import databaseConfig from '@core/config/database.config';
+import jwtConfig from '@core/config/jwt.config';
+import appConfig from '@core/config/app.config';
+import { CoreModule } from '@core/core.module';
+import { AuthModule } from '@core/auth/auth.module';
+import { UserModule } from '@modules/user/user.module';
+import { DepartmentModule } from '@modules/department/department.module';
+import { ArticleModule } from '@modules/article/article.module';
+import { CategoryModule } from '@modules/category/category.module';
+import { TicketModule } from '@modules/ticket/ticket.module';
+import { AnalyticsModule } from '@modules/analytics/analytics.module';
 
 @Module({
-  imports: [
-    ConfigModule.forRoot({ isGlobal: true, load: [databaseConfig, jwtConfig, appConfig] }),
-    CoreModule,
-    DatabaseModule,
-
-    // Domínios principais
-    TenantsModule,
-    UsersModule,
-    TicketsModule,
-    AuthModule,
-    KnowledgeModule,
-    DepartmentsModule,
-  ],
+    imports: [
+        ConfigModule.forRoot({
+            isGlobal: true,
+            load: [databaseConfig, jwtConfig, appConfig],
+        }),
+        CoreModule,
+        AuthModule,
+        UserModule,
+        DepartmentModule,
+        ArticleModule,
+        CategoryModule,
+        TicketModule,
+        AnalyticsModule,
+    ],
 })
 export class AppModule {}

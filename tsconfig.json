@@ -26,12 +26,9 @@
       "./types"
     ],
     "paths": {
-      "@config/*": ["src/config/*"],
       "@core/*": ["src/core/*"],
       "@modules/*": ["src/modules/*"],
-      "@infrastructure/*": ["src/infrastructure/*"],
-      "@database/*": ["src/infrastructure/database/*"],
-      "@shared/*": ["src/shared/*"]
+      "@common/*": ["src/common/*"]
     }
   },
   "include": ["src/**/*", "test/**/*", "src/infrastructure/database"],

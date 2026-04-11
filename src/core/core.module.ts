@@ -1,8 +1,11 @@
-import { Module } from '@nestjs/common';
-import { BcryptService } from './bcrypt.service';
+import { Global, Module } from '@nestjs/common';
+import { DatabaseModule } from './database/database.module';
+import { HashService } from './services/hash.service';
 
+@Global()
 @Module({
-    providers: [BcryptService],
-    exports: [BcryptService],
+    imports: [DatabaseModule],
+    providers: [HashService],
+    exports: [HashService],
 })
 export class CoreModule {}
