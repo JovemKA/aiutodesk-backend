@@ -55,6 +55,13 @@ export class Ticket {
   resolvedAt!: Date | null;
 
   @Index()
+  @Column({ name: 'chat_conversation_id', type: 'varchar', length: 120, nullable: true })
+  chatConversationId!: string | null;
+
+  @Column({ name: 'chat_summary', type: 'text', nullable: true })
+  chatSummary!: string | null;
+
+  @Index()
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

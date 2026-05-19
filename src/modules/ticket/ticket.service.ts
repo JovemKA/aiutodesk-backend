@@ -16,6 +16,14 @@ interface TicketFilters {
     departmentId?: string;
 }
 
+interface CreateChatEscalationInput {
+    requesterId: string;
+    inferredSubject: string;
+    summary: string;
+    conversationId: string;
+    priority?: TicketPriority;
+}
+
 @Injectable()
 export class TicketService {
     constructor(
@@ -31,12 +39,32 @@ export class TicketService {
             status: TicketStatus.OPEN,
             requester: { id: requesterId } as Ticket['requester'],
             assignedUser: null,
+            chatConversationId: null,
+            chatSummary: null,
             department: dto.department_id
                 ? ({ id: dto.department_id } as Ticket['department'])
                 : null,
             category: dto.category_id
                 ? ({ id: dto.category_id } as Ticket['category'])
                 : null,
+        });
+
+        const savedTicket = await this.ticketRepo.save(ticket);
+        return this.findOne(savedTicket.id);
+    }
+
+    async createFromChatEscalation(input: CreateChatEscalationInput): Promise<Ticket> {
+        const ticket = this.ticketRepo.create({
+            title: input.inferredSubject,
+            description: input.summary,
+            priority: input.priority ?? TicketPriority.MEDIUM,
+            status: TicketStatus.OPEN,
+            requester: { id: input.requesterId } as Ticket['requester'],
+            assignedUser: null,
+            department: null,
+            category: null,
+            chatConversationId: input.conversationId,
+            chatSummary: input.summary,
         });
 
         const savedTicket = await this.ticketRepo.save(ticket);

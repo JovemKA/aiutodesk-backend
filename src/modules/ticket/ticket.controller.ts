@@ -12,6 +12,9 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { JwtAuthGuard } from '@core/auth/jwt-auth.guard';
+import { RolesGuard } from '@core/auth/roles.guard';
+import { Roles } from '@core/auth/roles.decorator';
+import { UserRole } from '@common/enums/user-role.enum';
 import { TicketService } from './ticket.service';
 import { TicketPriority } from '@common/enums/ticket-priority.enum';
 import { TicketStatus } from '@common/enums/ticket-status.enum';
@@ -21,7 +24,8 @@ import { UpdateStatusDto } from './dto/update-status.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 
 @Controller('tickets')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.DEV, UserRole.MASTER, UserRole.ADMIN)
 export class TicketController {
     constructor(private readonly ticketService: TicketService) {}
 

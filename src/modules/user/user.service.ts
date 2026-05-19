@@ -6,6 +6,7 @@ import { UserDepartment } from './entities/user-department.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { HashService } from '@core/services/hash.service';
+import { UserRole } from '@common/enums/user-role.enum';
 
 @Injectable()
 export class UserService {
@@ -17,7 +18,7 @@ export class UserService {
         private readonly hashService: HashService,
     ) {}
 
-    findAll(role?: string, include?: string[]): Promise<User[]> {
+    findAll(role?: UserRole, include?: string[]): Promise<User[]> {
         const where: FindOptionsWhere<User> = {};
         if (role) where.role = role;
 
@@ -28,7 +29,7 @@ export class UserService {
         });
     }
 
-    getByRole(role: string) {
+    getByRole(role: UserRole) {
         return this.userRepo.find({
             where: { role },
             order: { id: 'ASC' },

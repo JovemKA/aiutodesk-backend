@@ -13,9 +13,13 @@ import { ArticleService } from './article.service';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
 import { JwtAuthGuard } from '@core/auth/jwt-auth.guard';
+import { RolesGuard } from '@core/auth/roles.guard';
+import { Roles } from '@core/auth/roles.decorator';
+import { UserRole } from '@common/enums/user-role.enum';
 
 @Controller('knowledge/articles')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.DEV, UserRole.MASTER, UserRole.ADMIN)
 export class ArticleController {
     constructor(private readonly articleService: ArticleService) {}
 
@@ -46,7 +50,8 @@ export class ArticleController {
 }
 
 @Controller('knowledge-base')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.DEV, UserRole.MASTER, UserRole.ADMIN)
 export class KnowledgeArticleController {
     constructor(private readonly articleService: ArticleService) {}
 
