@@ -2,31 +2,38 @@ import {
     Entity,
     PrimaryGeneratedColumn,
     Column,
+    CreateDateColumn,
 } from 'typeorm';
 
 @Entity('KBArticles')
 export class Article {
     @PrimaryGeneratedColumn('uuid')
-    id: string;
+    id!: string;
 
     @Column({ type: 'varchar' })
-    title: string;
+    title!: string;
 
     @Column({ type: 'text' })
-    content: string;
+    content!: string;
+
+    @Column({ name: 'is_published', type: 'boolean', default: true })
+    isPublished!: boolean;
+
+    @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
+    createdAt!: Date;
 
     @Column({ type: 'int', nullable: true })
-    author_id: number;
+    author_id!: number;
 
     @Column({ type: 'int', nullable: true })
-    category_id: number;
+    category_id!: number;
 
     @Column({ type: 'varchar', nullable: true })
-    status: string;
+    status!: string;
 
     @Column({ type: 'timestamp', nullable: true })
-    publication_date: Date;
+    publication_date!: Date;
 
     @Column({ type: 'timestamp', nullable: true })
-    last_reviewed_date: Date;
+    last_reviewed_date!: Date;
 }

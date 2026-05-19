@@ -1,13 +1,17 @@
-import { IsString, IsOptional } from 'class-validator';
+import { IsBoolean, IsOptional, IsString } from 'class-validator';
 
 export class CreateArticleDto {
     @IsString()
-    title: string;
+    title!: string;
 
     @IsString()
-    content: string;
+    content!: string;
 
     @IsOptional()
     @IsString()
     categoryId?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    isPublished?: boolean;
 }
