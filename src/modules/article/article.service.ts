@@ -63,7 +63,7 @@ export class ArticleService {
         return (lastSpace > 0 ? slice.slice(0, lastSpace) : slice).trim();
     }
 
-    async create(dto: CreateArticleDto) {
+    async create(dto: CreateArticleDto, actorUserId?: string) {
         const baseSlug = this.slugify(dto.slug ?? dto.title);
         const slug = await this.ensureUniqueSlug(baseSlug);
 
@@ -74,7 +74,7 @@ export class ArticleService {
             content: dto.content,
             tags: dto.tags ?? [],
             isPublished: dto.isPublished ?? true,
-            author: dto.authorId ? ({ id: dto.authorId } as User) : undefined,
+            author: (actorUserId ?? dto.authorId) ? ({ id: actorUserId ?? dto.authorId } as User) : undefined,
             category: dto.categoryId ? ({ id: dto.categoryId } as Category) : undefined,
         });
 
@@ -82,11 +82,11 @@ export class ArticleService {
     }
 
     async findAll() {
-        return await this.articleRepo.find();
+        return await this.articleRepo.find({ relations: { author: true, category: true } });
     }
 
     async findOne(id: string) {
-        const article = await this.articleRepo.findOne({ where: { id } });
+        const article = await this.articleRepo.findOne({ where: { id }, relations: { author: true, category: true } });
         if (!article) {
             throw new NotFoundException('Artigo não encontrado');
         }
@@ -94,13 +94,28 @@ export class ArticleService {
     }
 
     async findBySlug(slug: string) {
-        const article = await this.articleRepo.findOne({ where: { slug } });
+        const article = await this.articleRepo.findOne({ where: { slug }, relations: { author: true, category: true } });
         if (!article) {
             throw new NotFoundException('Artigo não encontrado');
         }
         await this.articleRepo.increment({ id: article.id }, 'viewCount', 1);
         article.viewCount += 1;
         return article;
+    }
+
+    async voteHelpful(slug: string, helpful: boolean) {
+        const article = await this.articleRepo.findOne({ where: { slug }, relations: { author: true, category: true } });
+        if (!article) {
+            throw new NotFoundException('Artigo não encontrado');
+        }
+
+        if (helpful) {
+            article.helpfulCount += 1;
+        } else {
+            article.notHelpfulCount += 1;
+        }
+
+        return await this.articleRepo.save(article);
     }
 
     async update(id: string, dto: UpdateArticleDto) {
