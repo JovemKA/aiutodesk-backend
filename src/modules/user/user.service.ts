@@ -10,6 +10,8 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { HashService } from '@core/services/hash.service';
 import { UserRole } from '@common/enums/user-role.enum';
+import { AccessRequestStatus } from '@modules/access-request/enums/access-request-status.enum';
+import { AccessRequestType } from '@modules/access-request/enums/access-request-type.enum';
 
 @Injectable()
 export class UserService {
@@ -47,7 +49,7 @@ export class UserService {
 
     async findById(id: string): Promise<User> {
         const user = await this.userRepo.findOne({ where: { id } });
-        if (!user) throw new NotFoundException(`Usuário com id ${id} não encontrado.`);
+        if (!user) throw new NotFoundException(`Usuario com id ${id} nao encontrado.`);
         return user;
     }
 
@@ -65,7 +67,7 @@ export class UserService {
 
     async save(dto: CreateUserDto) {
         const existing = await this.userRepo.findOne({ where: { email: dto.email } });
-        if (existing) throw new ConflictException('E-mail já está em uso');
+        if (existing) throw new ConflictException('E-mail ja esta em uso');
 
         const hashedPassword = await this.hashService.hash(dto.password);
 
@@ -141,30 +143,61 @@ export class UserService {
         return rest;
     }
 
-    // User-Department methods
-    linkDepartment(userId: string, departmentId: string) {
-        return this.userDeptRepo.findOne({
+    async linkDepartment(
+        userId: string,
+        departmentId: string,
+        makePrimary = false,
+    ): Promise<UserDepartment> {
+        const existing = await this.userDeptRepo.findOne({
             where: {
                 user: { id: userId },
                 department: { id: departmentId } as any,
             },
             relations: ['department'],
-        }).then((existing) => {
-            if (existing) return existing;
+        });
 
-            const link = this.userDeptRepo.create({
-                user: { id: userId } as User,
-                department: { id: departmentId } as any,
-            });
-            return this.userDeptRepo.save(link);
+        if (existing) {
+            if (makePrimary || !(await this.hasPrimaryDepartment(userId))) {
+                return this.setPrimaryDepartment(userId, departmentId);
+            }
+            return existing;
+        }
+
+        const shouldBePrimary = makePrimary || !(await this.hasPrimaryDepartment(userId));
+        const link = this.userDeptRepo.create({
+            user: { id: userId } as User,
+            department: { id: departmentId } as any,
+            isPrimary: shouldBePrimary,
+        });
+        const saved = await this.userDeptRepo.save(link);
+
+        if (saved.isPrimary) {
+            await this.normalizePrimaryDepartment(userId, saved.id);
+        }
+
+        return this.userDeptRepo.findOneOrFail({
+            where: { id: saved.id },
+            relations: ['department'],
         });
     }
 
     async unlinkDepartment(userId: string, departmentId: string) {
-        await this.userDeptRepo.delete({
-            user: { id: userId } as User,
-            department: { id: departmentId } as any,
+        const existing = await this.userDeptRepo.findOne({
+            where: {
+                user: { id: userId },
+                department: { id: departmentId } as any,
+            },
         });
+
+        if (!existing) {
+            return { success: true };
+        }
+
+        await this.userDeptRepo.delete({ id: existing.id });
+        if (existing.isPrimary) {
+            await this.ensurePrimaryDepartment(userId);
+        }
+
         return { success: true };
     }
 
@@ -172,14 +205,135 @@ export class UserService {
         return this.userDeptRepo.find({
             where: { user: { id: userId } },
             relations: ['department'],
+            order: { isPrimary: 'DESC', id: 'ASC' },
+        });
+    }
+
+    async setPrimaryDepartment(userId: string, departmentId: string): Promise<UserDepartment> {
+        const links = await this.userDeptRepo.find({
+            where: { user: { id: userId } },
+            relations: ['department'],
+            order: { id: 'ASC' },
+        });
+        const target = links.find((link) => link.department?.id === departmentId);
+        if (!target) {
+            throw new NotFoundException('Departamento nao esta vinculado ao usuario.');
+        }
+
+        for (const link of links) {
+            link.isPrimary = link.id === target.id;
+        }
+        await this.userDeptRepo.save(links);
+
+        return this.userDeptRepo.findOneOrFail({
+            where: { id: target.id },
+            relations: ['department'],
         });
     }
 
     async requestDepartmentInclusion(userId: string, departmentId: string) {
         const user = await this.findById(userId);
         if (user.role !== UserRole.DEV) {
-            throw new ConflictException('Apenas usuários Dev podem solicitar inclusão em departamento.');
+            throw new ConflictException('Apenas usuarios Dev podem solicitar inclusao em departamento.');
         }
-        return this.linkDepartment(userId, departmentId);
+
+        const existingLink = await this.userDeptRepo.findOne({
+            where: {
+                user: { id: userId },
+                department: { id: departmentId } as any,
+            },
+        });
+        if (existingLink) {
+            throw new ConflictException('Usuario ja esta vinculado a este departamento.');
+        }
+
+        await this.ensureNoPendingAccessRequest(userId);
+        const request = this.accessRequestRepo.create({
+            requester: { id: userId } as User,
+            requestedRole: null,
+            requestedDepartment: { id: departmentId } as any,
+            type: AccessRequestType.DEPARTMENT_INCLUSION,
+            status: AccessRequestStatus.PENDING,
+            reviewedBy: null,
+            reviewedAt: null,
+        });
+        return this.accessRequestRepo.save(request);
+    }
+
+    async requestPrimaryDepartmentChange(userId: string, departmentId: string) {
+        const user = await this.findById(userId);
+        if (user.role !== UserRole.DEV) {
+            throw new ConflictException('Apenas usuarios Dev podem solicitar troca de departamento principal.');
+        }
+
+        const existingLink = await this.userDeptRepo.findOne({
+            where: {
+                user: { id: userId },
+                department: { id: departmentId } as any,
+            },
+        });
+        if (!existingLink) {
+            throw new NotFoundException('Departamento nao esta vinculado ao usuario.');
+        }
+        if (existingLink.isPrimary) {
+            throw new ConflictException('Departamento informado ja e o principal.');
+        }
+
+        await this.ensureNoPendingAccessRequest(userId);
+        const request = this.accessRequestRepo.create({
+            requester: { id: userId } as User,
+            requestedRole: null,
+            requestedDepartment: { id: departmentId } as any,
+            type: AccessRequestType.PRIMARY_DEPARTMENT_CHANGE,
+            status: AccessRequestStatus.PENDING,
+            reviewedBy: null,
+            reviewedAt: null,
+        });
+        return this.accessRequestRepo.save(request);
+    }
+
+    private async hasPrimaryDepartment(userId: string): Promise<boolean> {
+        const count = await this.userDeptRepo.count({
+            where: {
+                user: { id: userId },
+                isPrimary: true,
+            },
+        });
+        return count > 0;
+    }
+
+    private async ensurePrimaryDepartment(userId: string): Promise<void> {
+        const links = await this.userDeptRepo.find({
+            where: { user: { id: userId } },
+            order: { id: 'ASC' },
+        });
+        if (links.length === 0 || links.some((link) => link.isPrimary)) {
+            return;
+        }
+
+        links[0].isPrimary = true;
+        await this.userDeptRepo.save(links[0]);
+    }
+
+    private async normalizePrimaryDepartment(userId: string, primaryLinkId: string): Promise<void> {
+        const links = await this.userDeptRepo.find({
+            where: { user: { id: userId } },
+        });
+        for (const link of links) {
+            link.isPrimary = link.id === primaryLinkId;
+        }
+        await this.userDeptRepo.save(links);
+    }
+
+    private async ensureNoPendingAccessRequest(userId: string): Promise<void> {
+        const pending = await this.accessRequestRepo.findOne({
+            where: {
+                requester: { id: userId },
+                status: AccessRequestStatus.PENDING,
+            },
+        });
+        if (pending) {
+            throw new ConflictException('Ja existe uma solicitacao pendente para este usuario.');
+        }
     }
 }

@@ -47,6 +47,12 @@ export class UserController {
         return this.userService.findByEmail(email);
     }
 
+    @Get('me/departments')
+    @Roles(UserRole.DEV)
+    findMyDepartments(@Req() req: Request & { user: { userId: string } }) {
+        return this.userService.findDepartments(req.user.userId);
+    }
+
     @Get(':id')
     findById(@Param('id', new ParseUUIDPipe()) id: string) {
         return this.userService.findById(id);
@@ -101,6 +107,14 @@ export class UserController {
         return this.userService.unlinkDepartment(userId, departmentId);
     }
 
+    @Patch(':userId/departments/:departmentId/primary')
+    setPrimaryDepartment(
+        @Param('userId') userId: string,
+        @Param('departmentId') departmentId: string,
+    ) {
+        return this.userService.setPrimaryDepartment(userId, departmentId);
+    }
+
     @Post('me/departments/:departmentId/request')
     @Roles(UserRole.DEV)
     requestDepartmentInclusion(
@@ -108,5 +122,14 @@ export class UserController {
         @Param('departmentId') departmentId: string,
     ) {
         return this.userService.requestDepartmentInclusion(req.user.userId, departmentId);
+    }
+
+    @Post('me/departments/:departmentId/primary-request')
+    @Roles(UserRole.DEV)
+    requestPrimaryDepartmentChange(
+        @Req() req: Request & { user: { userId: string } },
+        @Param('departmentId') departmentId: string,
+    ) {
+        return this.userService.requestPrimaryDepartmentChange(req.user.userId, departmentId);
     }
 }
