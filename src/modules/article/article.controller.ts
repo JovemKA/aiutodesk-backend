@@ -44,3 +44,19 @@ export class ArticleController {
         return this.articleService.remove(id);
     }
 }
+
+@Controller('knowledge-base')
+@UseGuards(JwtAuthGuard)
+export class KnowledgeArticleController {
+    constructor(private readonly articleService: ArticleService) {}
+
+    @Get()
+    findAll() {
+        return this.articleService.findAll();
+    }
+
+    @Get(':slug')
+    findBySlug(@Param('slug') slug: string) {
+        return this.articleService.findBySlug(slug);
+    }
+}

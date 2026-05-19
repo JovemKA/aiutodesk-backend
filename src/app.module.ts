@@ -11,6 +11,7 @@ import { ArticleModule } from '@modules/article/article.module';
 import { CategoryModule } from '@modules/category/category.module';
 import { TicketModule } from '@modules/ticket/ticket.module';
 import { AnalyticsModule } from '@modules/analytics/analytics.module';
+import { ChatModule } from '@modules/chat/chat.module';
 
 @Module({
     imports: [
@@ -26,6 +27,7 @@ import { AnalyticsModule } from '@modules/analytics/analytics.module';
         CategoryModule,
         TicketModule,
         AnalyticsModule,
+        ChatModule,
     ],
 })
 export class AppModule {}
