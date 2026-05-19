@@ -3,6 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { UserDepartment } from './entities/user-department.entity';
+import { AccessRequest } from '@modules/access-request/entities/access-request.entity';
+import { Ticket } from '@modules/ticket/entities/ticket.entity';
+import { Article } from '@modules/article/entities/article.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { HashService } from '@core/services/hash.service';
@@ -15,6 +18,12 @@ export class UserService {
         private readonly userRepo: Repository<User>,
         @InjectRepository(UserDepartment)
         private readonly userDeptRepo: Repository<UserDepartment>,
+        @InjectRepository(AccessRequest)
+        private readonly accessRequestRepo: Repository<AccessRequest>,
+        @InjectRepository(Ticket)
+        private readonly ticketRepo: Repository<Ticket>,
+        @InjectRepository(Article)
+        private readonly articleRepo: Repository<Article>,
         private readonly hashService: HashService,
     ) {}
 
@@ -97,6 +106,28 @@ export class UserService {
 
     async remove(id: string): Promise<void> {
         const user = await this.findById(id);
+
+        await this.userDeptRepo.delete({ user: { id } as User });
+
+        await this.accessRequestRepo.update(
+            { reviewedBy: { id } as User },
+            { reviewedBy: null },
+        );
+        await this.accessRequestRepo.delete({ requester: { id } as User });
+
+        await this.ticketRepo.update(
+            { assignedUser: { id } as User },
+            { assignedUser: null },
+        );
+        await this.ticketRepo.delete({ requester: { id } as User });
+
+        await this.articleRepo
+            .createQueryBuilder()
+            .update(Article)
+            .set({ author: () => 'NULL' } as any)
+            .where('author_id = :id', { id })
+            .execute();
+
         await this.userRepo.remove(user);
     }
 

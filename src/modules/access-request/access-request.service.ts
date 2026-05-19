@@ -7,7 +7,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserRole } from '@common/enums/user-role.enum';
+import { Department } from '@modules/department/entities/department.entity';
 import { User } from '@modules/user/entities/user.entity';
+import { UserDepartment } from '@modules/user/entities/user-department.entity';
 import { AccessRequest } from './entities/access-request.entity';
 import { AccessRequestStatus } from './enums/access-request-status.enum';
 import { CreateAccessRequestDto } from './dto/create-access-request.dto';
@@ -19,6 +21,10 @@ export class AccessRequestService {
         private readonly accessRequestRepo: Repository<AccessRequest>,
         @InjectRepository(User)
         private readonly userRepo: Repository<User>,
+        @InjectRepository(UserDepartment)
+        private readonly userDepartmentRepo: Repository<UserDepartment>,
+        @InjectRepository(Department)
+        private readonly departmentRepo: Repository<Department>,
     ) {}
 
     async create(requesterId: string, dto: CreateAccessRequestDto) {
@@ -80,7 +86,7 @@ export class AccessRequestService {
         });
     }
 
-    async approve(id: string, reviewerId: string) {
+    async approve(id: string, reviewerId: string, departmentId?: string) {
         const request = await this.accessRequestRepo.findOne({
             where: { id },
             relations: { requester: true },
@@ -92,6 +98,27 @@ export class AccessRequestService {
 
         if (request.status !== AccessRequestStatus.PENDING) {
             throw new BadRequestException('Only pending requests can be approved');
+        }
+
+        if (request.requestedRole === UserRole.DEV) {
+            if (!departmentId) {
+                throw new BadRequestException('Department is required when approving DEV access');
+            }
+
+            const department = await this.departmentRepo.findOne({ where: { id: departmentId } });
+            if (!department) {
+                throw new NotFoundException('Department not found');
+            }
+
+            await this.userDepartmentRepo.delete({ user: { id: request.requester.id } });
+            await this.userDepartmentRepo.save(
+                this.userDepartmentRepo.create({
+                    user: { id: request.requester.id } as User,
+                    department: { id: department.id } as Department,
+                }),
+            );
+        } else {
+            await this.userDepartmentRepo.delete({ user: { id: request.requester.id } });
         }
 
         await this.userRepo.update(

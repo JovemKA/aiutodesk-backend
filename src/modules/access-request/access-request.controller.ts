@@ -6,6 +6,7 @@ import { Roles } from '@core/auth/roles.decorator';
 import { UserRole } from '@common/enums/user-role.enum';
 import { AccessRequestService } from './access-request.service';
 import { CreateAccessRequestDto } from './dto/create-access-request.dto';
+import { ApproveAccessRequestDto } from './dto/approve-access-request.dto';
 
 @Controller('access-requests')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -38,8 +39,9 @@ export class AccessRequestController {
     approve(
         @Param('id') id: string,
         @Req() req: Request & { user: { userId: string } },
+        @Body() dto: ApproveAccessRequestDto,
     ) {
-        return this.accessRequestService.approve(id, req.user.userId);
+        return this.accessRequestService.approve(id, req.user.userId, dto.departmentId);
     }
 
     @Patch(':id/reject')
