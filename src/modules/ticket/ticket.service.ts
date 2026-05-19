@@ -1,9 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { TicketPriority } from '@common/enums/ticket-priority.enum';
 import { TicketStatus } from '@common/enums/ticket-status.enum';
 import { UserRole } from '@common/enums/user-role.enum';
+import { User } from '@modules/user/entities/user.entity';
 import { UserDepartment } from '@modules/user/entities/user-department.entity';
 import { Ticket } from './entities/ticket.entity';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -31,6 +32,13 @@ interface CreateChatEscalationInput {
     priority?: TicketPriority;
 }
 
+interface AssignableUserDto {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole;
+}
+
 @Injectable()
 export class TicketService {
     constructor(
@@ -38,6 +46,8 @@ export class TicketService {
         private readonly ticketRepo: Repository<Ticket>,
         @InjectRepository(UserDepartment)
         private readonly userDepartmentRepo: Repository<UserDepartment>,
+        @InjectRepository(User)
+        private readonly userRepo: Repository<User>,
     ) {}
 
     async create(dto: CreateTicketDto, requesterId: string, role: UserRole): Promise<Ticket> {
@@ -188,10 +198,56 @@ export class TicketService {
 
     async assign(id: string, assignTicketDto: AssignTicketDto, actor: TicketActor): Promise<Ticket> {
         const ticket = await this.findOne(id, actor);
+
+        const assignee = await this.userRepo.findOne({ where: { id: assignTicketDto.assigned_user_id } });
+        if (!assignee) {
+            throw new NotFoundException('Usuário para atribuição não encontrado.');
+        }
+
+        await this.assertUserCanBeAssigned(ticket, assignee);
         ticket.assignedUser = { id: assignTicketDto.assigned_user_id } as Ticket['assignedUser'];
 
         await this.ticketRepo.save(ticket);
         return this.findOne(id, actor);
+    }
+
+    async findAssignableUsers(id: string, actor: TicketActor): Promise<AssignableUserDto[]> {
+        const ticket = await this.findOne(id, actor);
+        const candidates = await this.userRepo.find({
+            where: {
+                role: In([UserRole.DEV, UserRole.MASTER, UserRole.ADMIN]),
+                isActive: true,
+            },
+            order: { name: 'ASC' },
+        });
+
+        const devCandidates = candidates.filter((user) => user.role === UserRole.DEV);
+        const devDepartmentIds = await this.getDepartmentIdsByUser(devCandidates.map((user) => user.id));
+        const ticketDepartmentId = ticket.department?.id ?? null;
+
+        return candidates
+            .filter((user) => {
+                if (user.role === UserRole.ADMIN || user.role === UserRole.MASTER) {
+                    return true;
+                }
+
+                if (user.role === UserRole.DEV) {
+                    if (!ticketDepartmentId) {
+                        return false;
+                    }
+
+                    const linkedDepartments = devDepartmentIds.get(user.id) ?? [];
+                    return linkedDepartments.includes(ticketDepartmentId);
+                }
+
+                return false;
+            })
+            .map((user) => ({
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+            }));
     }
 
     async updateStatus(id: string, updateStatusDto: UpdateStatusDto, actor: TicketActor): Promise<Ticket> {
@@ -223,5 +279,50 @@ export class TicketService {
         return links
             .map((link) => link.department?.id)
             .filter((id): id is string => Boolean(id));
+    }
+
+    private async assertUserCanBeAssigned(ticket: Ticket, assignee: User): Promise<void> {
+        if (![UserRole.DEV, UserRole.MASTER, UserRole.ADMIN].includes(assignee.role)) {
+            throw new ForbiddenException('Somente usuários Dev, Master ou Admin podem ser atribuídos.');
+        }
+
+        if (assignee.role === UserRole.ADMIN || assignee.role === UserRole.MASTER) {
+            return;
+        }
+
+        const ticketDepartmentId = ticket.department?.id;
+        if (!ticketDepartmentId) {
+            throw new ForbiddenException('Tickets sem departamento não podem ser atribuídos para Dev.');
+        }
+
+        const allowedDepartmentIds = await this.getAllowedDepartmentIds(assignee.id);
+        if (!allowedDepartmentIds.includes(ticketDepartmentId)) {
+            throw new ForbiddenException('Dev só pode ser atribuído a ticket do próprio departamento.');
+        }
+    }
+
+    private async getDepartmentIdsByUser(userIds: string[]): Promise<Map<string, string[]>> {
+        const map = new Map<string, string[]>();
+        if (userIds.length === 0) {
+            return map;
+        }
+
+        const links = await this.userDepartmentRepo.find({
+            where: { user: { id: In(userIds) } },
+            relations: { user: true, department: true },
+        });
+
+        for (const link of links) {
+            const userId = link.user?.id;
+            const departmentId = link.department?.id;
+            if (!userId || !departmentId) {
+                continue;
+            }
+            const existing = map.get(userId) ?? [];
+            existing.push(departmentId);
+            map.set(userId, existing);
+        }
+
+        return map;
     }
 }

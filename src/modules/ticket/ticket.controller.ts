@@ -16,6 +16,7 @@ import { RolesGuard } from '@core/auth/roles.guard';
 import { Roles } from '@core/auth/roles.decorator';
 import { UserRole } from '@common/enums/user-role.enum';
 import { TicketService } from './ticket.service';
+import { User } from '@modules/user/entities/user.entity';
 import { TicketPriority } from '@common/enums/ticket-priority.enum';
 import { TicketStatus } from '@common/enums/ticket-status.enum';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -59,6 +60,14 @@ export class TicketController {
         @Param('id') id: string,
     ) {
         return this.ticketService.findOne(id, req.user);
+    }
+
+    @Get(':id/assignable-users')
+    assignableUsers(
+        @Req() req: Request & { user: { userId: string; role: UserRole } },
+        @Param('id') id: string,
+    ) {
+        return this.ticketService.findAssignableUsers(id, req.user);
     }
 
     @Patch(':id')
