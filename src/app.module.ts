@@ -12,6 +12,7 @@ import { CategoryModule } from '@modules/category/category.module';
 import { TicketModule } from '@modules/ticket/ticket.module';
 import { AnalyticsModule } from '@modules/analytics/analytics.module';
 import { ChatModule } from '@modules/chat/chat.module';
+import { AccessRequestModule } from '@modules/access-request/access-request.module';
 
 @Module({
     imports: [
@@ -28,6 +29,7 @@ import { ChatModule } from '@modules/chat/chat.module';
         TicketModule,
         AnalyticsModule,
         ChatModule,
+        AccessRequestModule,
     ],
 })
 export class AppModule {}

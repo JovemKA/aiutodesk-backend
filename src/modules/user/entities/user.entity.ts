@@ -28,7 +28,7 @@ export class User {
     isActive: boolean;
 
     @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
-    role: string;
+    role: UserRole;
 
     @Index()
     @CreateDateColumn({ name: 'created_at', type: 'timestamp' })

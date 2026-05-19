@@ -5,6 +5,16 @@ import { Category } from './entities/category.entity';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 
+const DEFAULT_CATEGORY_NAMES = [
+    'Acesso',
+    'Hardware',
+    'Software',
+    'Rede',
+    'Faturamento',
+    'Integrações',
+    'Outros',
+];
+
 @Injectable()
 export class CategoryService {
     constructor(
@@ -12,8 +22,26 @@ export class CategoryService {
         private readonly categoryRepo: Repository<Category>,
     ) {}
 
-    findAll(relations: string[] = []) {
-        return this.categoryRepo.find({ relations });
+    async findAll(relations: string[] = []) {
+        let categories = await this.categoryRepo.find({ relations });
+
+        const existingNames = new Set(
+            categories.map((category) => category.name.trim().toLowerCase()),
+        );
+
+        const missingNames = DEFAULT_CATEGORY_NAMES.filter(
+            (name) => !existingNames.has(name.trim().toLowerCase()),
+        );
+
+        if (missingNames.length > 0) {
+            const toInsert = missingNames.map((name) =>
+                this.categoryRepo.create({ name }),
+            );
+            await this.categoryRepo.save(toInsert);
+            categories = await this.categoryRepo.find({ relations });
+        }
+
+        return categories;
     }
 
     async findById(id: string, relations: string[] = []) {

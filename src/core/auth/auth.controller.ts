@@ -33,7 +33,11 @@ export class AuthController {
     async getMe(@Req() req) {
         return {
             message: 'Authenticated user',
-            user: req.user,
+            user: {
+                id: req.user.userId,
+                email: req.user.email,
+                role: req.user.role,
+            },
         };
     }
 

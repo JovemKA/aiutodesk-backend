@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
 import { Article } from '@modules/article/entities/article.entity';
+import { TicketService } from '@modules/ticket/ticket.service';
+import { TicketPriority } from '@common/enums/ticket-priority.enum';
 
 interface ChatSource {
     id: string;
@@ -12,6 +14,14 @@ interface ChatAnswer {
     answer: string;
     sources: ChatSource[];
     shouldEscalate: boolean;
+    escalatedTicketId?: string;
+    conversationId?: string;
+}
+
+interface AskChatParams {
+    message: string;
+    requesterId: string;
+    conversationId?: string;
 }
 
 @Injectable()
@@ -19,17 +29,38 @@ export class ChatService {
     constructor(
         @InjectRepository(Article)
         private readonly articleRepo: Repository<Article>,
+        private readonly ticketService: TicketService,
     ) {}
 
-    async ask(message: string): Promise<ChatAnswer> {
+    async ask(params: AskChatParams): Promise<ChatAnswer> {
+        const conversationId = params.conversationId ?? this.generateConversationId();
+        const message = params.message;
         const terms = this.extractKeywords(message);
         const articles = await this.findRelevantArticles(terms);
 
-        if (articles.length === 0) {
+        const unresolvedByHint = this.hasEscalationHint(message);
+        const shouldEscalate = unresolvedByHint || articles.length === 0;
+
+        if (shouldEscalate) {
+            const summary = this.buildConversationSummary(message, articles);
+            const inferredSubject = this.inferSubject(message, terms);
+            const ticket = await this.ticketService.createFromChatEscalation({
+                requesterId: params.requesterId,
+                conversationId,
+                inferredSubject,
+                summary,
+                priority: TicketPriority.MEDIUM,
+            });
+
             return {
-                answer: 'Nao encontrei artigos relevantes para sua pergunta. Posso abrir um ticket para voce.',
-                sources: [],
+                answer: 'Nao consegui resolver com seguranca por aqui. Escalei automaticamente para o time e um ticket foi criado.',
+                sources: articles.map((article) => ({
+                    id: article.id,
+                    title: article.title,
+                })),
                 shouldEscalate: true,
+                escalatedTicketId: ticket.id,
+                conversationId,
             };
         }
 
@@ -42,7 +73,48 @@ export class ChatService {
                 title: article.title,
             })),
             shouldEscalate: false,
+            conversationId,
         };
+    }
+
+    private hasEscalationHint(message: string): boolean {
+        const lower = message.toLowerCase();
+        const hints = [
+            'nao resolveu',
+            'não resolveu',
+            'sem sucesso',
+            'urgente',
+            'critico',
+            'crítico',
+            'abrir chamado',
+            'abrir ticket',
+            'escalar',
+            'preciso de humano',
+        ];
+
+        return hints.some((hint) => lower.includes(hint));
+    }
+
+    private inferSubject(message: string, terms: string[]): string {
+        if (terms.length > 0) {
+            const label = terms.slice(0, 4).join(' ');
+            return `Escalacao automatica via chat: ${label}`;
+        }
+
+        return `Escalacao automatica via chat: ${this.truncate(message, 60)}`;
+    }
+
+    private buildConversationSummary(message: string, articles: Article[]): string {
+        const articleTitles = articles.map((a) => a.title).slice(0, 3);
+        const sourceText = articleTitles.length > 0
+            ? `Artigos considerados: ${articleTitles.join(' | ')}`
+            : 'Nenhum artigo relevante encontrado';
+
+        return `Mensagem original do usuario: ${message}\n${sourceText}`;
+    }
+
+    private generateConversationId(): string {
+        return `chat-${Date.now()}`;
     }
 
     private extractKeywords(message: string): string[] {
