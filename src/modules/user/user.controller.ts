@@ -9,8 +9,10 @@ import {
     Patch,
     Post,
     Query,
+    Req,
     UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { JwtAuthGuard } from '@core/auth/jwt-auth.guard';
 import { RolesGuard } from '@core/auth/roles.guard';
 import { Roles } from '@core/auth/roles.decorator';
@@ -43,6 +45,12 @@ export class UserController {
     @Get('email/:email')
     findByEmail(@Param('email') email: string) {
         return this.userService.findByEmail(email);
+    }
+
+    @Get('me/departments')
+    @Roles(UserRole.DEV)
+    findMyDepartments(@Req() req: Request & { user: { userId: string } }) {
+        return this.userService.findDepartments(req.user.userId);
     }
 
     @Get(':id')
@@ -89,5 +97,39 @@ export class UserController {
     @Get(':userId/departments')
     findDepartments(@Param('userId') userId: string) {
         return this.userService.findDepartments(userId);
+    }
+
+    @Delete(':userId/departments/:departmentId')
+    unlinkDepartment(
+        @Param('userId') userId: string,
+        @Param('departmentId') departmentId: string,
+    ) {
+        return this.userService.unlinkDepartment(userId, departmentId);
+    }
+
+    @Patch(':userId/departments/:departmentId/primary')
+    setPrimaryDepartment(
+        @Param('userId') userId: string,
+        @Param('departmentId') departmentId: string,
+    ) {
+        return this.userService.setPrimaryDepartment(userId, departmentId);
+    }
+
+    @Post('me/departments/:departmentId/request')
+    @Roles(UserRole.DEV)
+    requestDepartmentInclusion(
+        @Req() req: Request & { user: { userId: string } },
+        @Param('departmentId') departmentId: string,
+    ) {
+        return this.userService.requestDepartmentInclusion(req.user.userId, departmentId);
+    }
+
+    @Post('me/departments/:departmentId/primary-request')
+    @Roles(UserRole.DEV)
+    requestPrimaryDepartmentChange(
+        @Req() req: Request & { user: { userId: string } },
+        @Param('departmentId') departmentId: string,
+    ) {
+        return this.userService.requestPrimaryDepartmentChange(req.user.userId, departmentId);
     }
 }
