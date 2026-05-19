@@ -143,11 +143,29 @@ export class UserService {
 
     // User-Department methods
     linkDepartment(userId: string, departmentId: string) {
-        const link = this.userDeptRepo.create({
+        return this.userDeptRepo.findOne({
+            where: {
+                user: { id: userId },
+                department: { id: departmentId } as any,
+            },
+            relations: ['department'],
+        }).then((existing) => {
+            if (existing) return existing;
+
+            const link = this.userDeptRepo.create({
+                user: { id: userId } as User,
+                department: { id: departmentId } as any,
+            });
+            return this.userDeptRepo.save(link);
+        });
+    }
+
+    async unlinkDepartment(userId: string, departmentId: string) {
+        await this.userDeptRepo.delete({
             user: { id: userId } as User,
             department: { id: departmentId } as any,
         });
-        return this.userDeptRepo.save(link);
+        return { success: true };
     }
 
     findDepartments(userId: string) {
@@ -155,5 +173,13 @@ export class UserService {
             where: { user: { id: userId } },
             relations: ['department'],
         });
+    }
+
+    async requestDepartmentInclusion(userId: string, departmentId: string) {
+        const user = await this.findById(userId);
+        if (user.role !== UserRole.DEV) {
+            throw new ConflictException('Apenas usuários Dev podem solicitar inclusão em departamento.');
+        }
+        return this.linkDepartment(userId, departmentId);
     }
 }

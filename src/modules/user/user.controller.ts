@@ -9,8 +9,10 @@ import {
     Patch,
     Post,
     Query,
+    Req,
     UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { JwtAuthGuard } from '@core/auth/jwt-auth.guard';
 import { RolesGuard } from '@core/auth/roles.guard';
 import { Roles } from '@core/auth/roles.decorator';
@@ -89,5 +91,22 @@ export class UserController {
     @Get(':userId/departments')
     findDepartments(@Param('userId') userId: string) {
         return this.userService.findDepartments(userId);
+    }
+
+    @Delete(':userId/departments/:departmentId')
+    unlinkDepartment(
+        @Param('userId') userId: string,
+        @Param('departmentId') departmentId: string,
+    ) {
+        return this.userService.unlinkDepartment(userId, departmentId);
+    }
+
+    @Post('me/departments/:departmentId/request')
+    @Roles(UserRole.DEV)
+    requestDepartmentInclusion(
+        @Req() req: Request & { user: { userId: string } },
+        @Param('departmentId') departmentId: string,
+    ) {
+        return this.userService.requestDepartmentInclusion(req.user.userId, departmentId);
     }
 }
