@@ -4,14 +4,22 @@ import { PRODUCT_CONTEXT } from './product-context';
 import { ESCALATION_POLICY } from './escalation-policy';
 import { ASSISTANT_IDENTITY, renderIdentityBlock } from './assistant-identity';
 import { renderUserContextBlock, UserContextInput } from './user-context';
+import {
+    renderKnowledgeBaseBlock,
+    KnowledgeBaseChunk,
+    KnowledgeBaseInventoryEntry,
+} from './knowledge-base';
 
 export { ASSISTANT_IDENTITY } from './assistant-identity';
 export type { AssistantIdentity } from './assistant-identity';
 export type { UserContextInput } from './user-context';
+export type { KnowledgeBaseChunk, KnowledgeBaseInventoryEntry } from './knowledge-base';
 
 export interface BuildSystemInstructionOptions {
     hasHistory?: boolean;
     user?: UserContextInput;
+    knowledgeBase?: KnowledgeBaseChunk[];
+    knowledgeBaseInventory?: KnowledgeBaseInventoryEntry[];
 }
 
 export function buildSystemInstruction(options: BuildSystemInstructionOptions = {}): string {
@@ -20,8 +28,23 @@ export function buildSystemInstruction(options: BuildSystemInstructionOptions = 
         `[Missão]\n${SYSTEM_PROMPT}`,
         `[Persona]\n${PERSONA_PROMPT}`,
         `[Contexto do produto]\n${PRODUCT_CONTEXT}`,
-        `[Escalonamento]\n${ESCALATION_POLICY}`,
     ];
+
+    const hasKb =
+        (options.knowledgeBase && options.knowledgeBase.length > 0) ||
+        (options.knowledgeBaseInventory && options.knowledgeBaseInventory.length > 0);
+
+    if (hasKb) {
+        const kbBlock = renderKnowledgeBaseBlock({
+            chunks: options.knowledgeBase ?? [],
+            inventory: options.knowledgeBaseInventory ?? [],
+        });
+        if (kbBlock) {
+            sections.push(`[Base de Conhecimento]\n${kbBlock}`);
+        }
+    }
+
+    sections.push(`[Escalonamento]\n${ESCALATION_POLICY}`);
 
     if (options.user) {
         const userBlock = renderUserContextBlock(options.user);

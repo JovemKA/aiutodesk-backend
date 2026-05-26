@@ -4,6 +4,12 @@ import { TicketService } from '@modules/ticket/ticket.service';
 import { TicketPriority } from '@common/enums/ticket-priority.enum';
 import { GeminiChatService } from './gemini-chat.service';
 import { ConversationHistoryProvider } from './history/conversation-history.provider';
+import { RagRetrieverService, RetrievedChunk } from './rag/rag-retriever.service';
+import { KnowledgeBaseInventoryService } from './rag/knowledge-base-inventory.service';
+import type {
+    KnowledgeBaseChunk,
+    KnowledgeBaseInventoryEntry,
+} from './prompts/knowledge-base';
 
 const DEFAULT_MAX_MESSAGE_CHARS = 4000;
 const TRUNCATION_SUFFIX = ' …[mensagem encurtada]';
@@ -11,6 +17,8 @@ const TRUNCATION_SUFFIX = ' …[mensagem encurtada]';
 interface ChatSource {
     id: string;
     title: string;
+    slug: string;
+    similarity: number;
 }
 
 export interface ChatAnswer {
@@ -30,7 +38,13 @@ export interface AskChatParams {
 
 export type ChatStreamEvent =
     | { type: 'token'; text: string }
-    | { type: 'meta'; shouldEscalate: boolean; escalatedTicketId?: string; conversationId: string }
+    | {
+          type: 'meta';
+          shouldEscalate: boolean;
+          escalatedTicketId?: string;
+          conversationId: string;
+          sources?: ChatSource[];
+      }
     | { type: 'done' }
     | { type: 'error'; message: string };
 
@@ -41,15 +55,57 @@ const ESCALATION_FIXED_REPLY =
 export class ChatService {
     private readonly logger = new Logger(ChatService.name);
     private readonly maxMessageChars: number;
+    private readonly ragEnabled: boolean;
 
     constructor(
         private readonly ticketService: TicketService,
         private readonly geminiChatService: GeminiChatService,
         private readonly historyProvider: ConversationHistoryProvider,
         private readonly configService: ConfigService,
+        private readonly ragRetriever: RagRetrieverService,
+        private readonly kbInventory: KnowledgeBaseInventoryService,
     ) {
         this.maxMessageChars =
             this.configService.get<number>('gemini.maxMessageChars') ?? DEFAULT_MAX_MESSAGE_CHARS;
+        this.ragEnabled = this.configService.get<boolean>('rag.enabled') ?? true;
+    }
+
+    private async retrieveKnowledge(
+        message: string,
+        requesterId: string,
+    ): Promise<RetrievedChunk[]> {
+        if (!this.ragEnabled) return [];
+        try {
+            return await this.ragRetriever.retrieve({ query: message, requesterId });
+        } catch (error) {
+            this.logger.warn(`Falha no RAG (continuando sem fontes): ${(error as Error).message}`);
+            return [];
+        }
+    }
+
+    private async loadInventory(): Promise<KnowledgeBaseInventoryEntry[]> {
+        if (!this.ragEnabled) return [];
+        try {
+            return await this.kbInventory.listPublished();
+        } catch (error) {
+            this.logger.warn(
+                `Falha ao carregar inventario da KB: ${(error as Error).message}`,
+            );
+            return [];
+        }
+    }
+
+    private toKnowledgeBase(chunks: RetrievedChunk[]): KnowledgeBaseChunk[] {
+        return chunks.map((c) => ({ title: c.title, slug: c.slug, content: c.content }));
+    }
+
+    private toSources(chunks: RetrievedChunk[]): ChatSource[] {
+        return chunks.map((c) => ({
+            id: c.articleId,
+            title: c.title,
+            slug: c.slug,
+            similarity: Number(c.similarity.toFixed(4)),
+        }));
     }
 
     async ask(params: AskChatParams): Promise<ChatAnswer> {
@@ -69,17 +125,26 @@ export class ChatService {
         }
 
         const history = await this.historyProvider.get(conversationId);
+        const [retrieved, inventory] = await Promise.all([
+            this.retrieveKnowledge(llmMessage, params.requesterId),
+            this.loadInventory(),
+        ]);
+        const knowledgeBase = this.toKnowledgeBase(retrieved);
+        const sources = this.toSources(retrieved);
+
         const result = await this.geminiChatService.generateReply({
             message: llmMessage,
             history,
             user: { name: params.userName },
+            knowledgeBase,
+            knowledgeBaseInventory: inventory,
         });
 
         if (result.shouldEscalate) {
             const ticket = await this.escalate(params, conversationId, originalMessage);
             return {
                 answer: result.cleanText,
-                sources: [],
+                sources,
                 shouldEscalate: true,
                 escalatedTicketId: ticket.id,
                 conversationId,
@@ -88,7 +153,7 @@ export class ChatService {
 
         return {
             answer: result.cleanText,
-            sources: [],
+            sources,
             shouldEscalate: false,
             conversationId,
         };
@@ -122,11 +187,20 @@ export class ChatService {
         }
 
         const history = await this.historyProvider.get(conversationId);
+        const [retrieved, inventory] = await Promise.all([
+            this.retrieveKnowledge(llmMessage, params.requesterId),
+            this.loadInventory(),
+        ]);
+        const knowledgeBase = this.toKnowledgeBase(retrieved);
+        const sources = this.toSources(retrieved);
+
         const result = await this.geminiChatService.streamReply(
             {
                 message: llmMessage,
                 history,
                 user: { name: params.userName },
+                knowledgeBase,
+                knowledgeBaseInventory: inventory,
             },
             {
                 onToken: (text) => onEvent({ type: 'token', text }),
@@ -149,6 +223,7 @@ export class ChatService {
             shouldEscalate: result.shouldEscalate,
             escalatedTicketId,
             conversationId,
+            sources,
         });
         onEvent({ type: 'done' });
     }

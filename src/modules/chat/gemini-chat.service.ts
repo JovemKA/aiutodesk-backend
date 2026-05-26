@@ -2,7 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
 import { buildSystemInstruction, parseLlmMeta, META_OPEN_TAG, UserContextInput } from './prompts';
+import type { KnowledgeBaseChunk, KnowledgeBaseInventoryEntry } from './prompts/knowledge-base';
 import { ChatTurn } from './history/conversation-history.provider';
+import { GeminiClientProvider } from './embeddings/gemini-client.provider';
 
 const FALLBACK_MESSAGE = 'Desculpe, não consegui gerar uma resposta agora. Tente novamente em instantes.';
 const DEFAULT_MODEL = 'gemini-2.5-flash';
@@ -11,6 +13,8 @@ export interface GenerateParams {
     message: string;
     history?: ChatTurn[];
     user?: UserContextInput;
+    knowledgeBase?: KnowledgeBaseChunk[];
+    knowledgeBaseInventory?: KnowledgeBaseInventoryEntry[];
 }
 
 export interface StreamCallbacks {
@@ -36,22 +40,17 @@ export class GeminiChatService {
     private readonly maxOutputTokens: number;
     private readonly requestTimeoutMs: number;
 
-    constructor(private readonly configService: ConfigService) {
+    constructor(
+        private readonly configService: ConfigService,
+        private readonly clientProvider: GeminiClientProvider,
+    ) {
         this.model = this.configService.get<string>('gemini.model') ?? DEFAULT_MODEL;
         this.temperature = this.configService.get<number>('gemini.temperature') ?? 0.2;
         this.topP = this.configService.get<number>('gemini.topP') ?? 0.9;
         this.topK = this.configService.get<number>('gemini.topK') ?? 40;
         this.maxOutputTokens = this.configService.get<number>('gemini.maxOutputTokens') ?? 1024;
         this.requestTimeoutMs = this.configService.get<number>('gemini.requestTimeoutMs') ?? 20000;
-
-        const apiKey = this.configService.get<string>('gemini.apiKey')?.trim();
-        if (!apiKey) {
-            this.logger.warn('GEMINI_API_KEY nao configurada. O chat vai usar fallback local.');
-            this.client = null;
-            return;
-        }
-
-        this.client = new GoogleGenAI({ apiKey });
+        this.client = this.clientProvider.getClient();
     }
 
     isReady(): boolean {
@@ -70,7 +69,12 @@ export class GeminiChatService {
             const response = await this.client.models.generateContent({
                 model: this.model,
                 contents: this.buildContents(params),
-                config: this.buildGenerationConfig(params.history, params.user),
+                config: this.buildGenerationConfig(
+                    params.history,
+                    params.user,
+                    params.knowledgeBase,
+                    params.knowledgeBaseInventory,
+                ),
             });
 
             const raw = response.text ?? '';
@@ -111,7 +115,12 @@ export class GeminiChatService {
             const stream = await this.client.models.generateContentStream({
                 model: this.model,
                 contents: this.buildContents(params),
-                config: this.buildGenerationConfig(params.history, params.user),
+                config: this.buildGenerationConfig(
+                    params.history,
+                    params.user,
+                    params.knowledgeBase,
+                    params.knowledgeBaseInventory,
+                ),
             });
 
             for await (const chunk of stream) {
@@ -192,11 +201,18 @@ export class GeminiChatService {
         ];
     }
 
-    private buildGenerationConfig(history?: ChatTurn[], user?: UserContextInput) {
+    private buildGenerationConfig(
+        history?: ChatTurn[],
+        user?: UserContextInput,
+        knowledgeBase?: KnowledgeBaseChunk[],
+        knowledgeBaseInventory?: KnowledgeBaseInventoryEntry[],
+    ) {
         return {
             systemInstruction: buildSystemInstruction({
                 hasHistory: Boolean(history && history.length),
                 user,
+                knowledgeBase,
+                knowledgeBaseInventory,
             }),
             temperature: this.temperature,
             topP: this.topP,

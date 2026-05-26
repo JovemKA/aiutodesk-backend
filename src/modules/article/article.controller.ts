@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { ArticleService } from './article.service';
+import { ArticleIndexerService } from './indexing/article-indexer.service';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
 import { JwtAuthGuard } from '@core/auth/jwt-auth.guard';
@@ -23,7 +24,10 @@ import { UserRole } from '@common/enums/user-role.enum';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.USER, UserRole.DEV, UserRole.MASTER, UserRole.ADMIN)
 export class ArticleController {
-    constructor(private readonly articleService: ArticleService) {}
+    constructor(
+        private readonly articleService: ArticleService,
+        private readonly indexer: ArticleIndexerService,
+    ) {}
 
     @Post()
     create(
@@ -53,6 +57,18 @@ export class ArticleController {
     @Roles(UserRole.DEV, UserRole.MASTER, UserRole.ADMIN)
     remove(@Param('id', new ParseUUIDPipe()) id: string) {
         return this.articleService.remove(id);
+    }
+
+    @Post(':id/reindex')
+    @Roles(UserRole.DEV, UserRole.MASTER, UserRole.ADMIN)
+    reindexOne(@Param('id', new ParseUUIDPipe()) id: string) {
+        return this.indexer.reindexArticle(id);
+    }
+
+    @Post('reindex-all')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    reindexAll() {
+        return this.indexer.reindexAll();
     }
 }
 
