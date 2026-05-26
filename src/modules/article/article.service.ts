@@ -1,21 +1,33 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Article } from './entities/article.entity';
 import { DepartmentArticle } from './entities/department-article.entity';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
+import { ArticleIndexerService } from './indexing/article-indexer.service';
 import { User } from '@modules/user/entities/user.entity';
 import { Category } from '@modules/category/entities/category.entity';
 
 @Injectable()
 export class ArticleService {
+    private readonly logger = new Logger(ArticleService.name);
+
     constructor(
         @InjectRepository(Article)
         private readonly articleRepo: Repository<Article>,
         @InjectRepository(DepartmentArticle)
         private readonly deptArticleRepo: Repository<DepartmentArticle>,
+        private readonly indexer: ArticleIndexerService,
     ) {}
+
+    private triggerReindex(articleId: string): void {
+        this.indexer.reindexArticle(articleId).catch((err: Error) => {
+            this.logger.warn(
+                `Reindex de artigo ${articleId} falhou (best-effort): ${err.message}`,
+            );
+        });
+    }
 
     private slugify(value: string) {
         const normalized = value
@@ -78,7 +90,9 @@ export class ArticleService {
             category: dto.categoryId ? ({ id: dto.categoryId } as Category) : undefined,
         });
 
-        return await this.articleRepo.save(article);
+        const saved = await this.articleRepo.save(article);
+        this.triggerReindex(saved.id);
+        return saved;
     }
 
     async findAll() {
@@ -159,7 +173,9 @@ export class ArticleService {
             article.category = dto.categoryId ? ({ id: dto.categoryId } as Category) : undefined;
         }
 
-        return await this.articleRepo.save(article);
+        const saved = await this.articleRepo.save(article);
+        this.triggerReindex(saved.id);
+        return saved;
     }
 
     async remove(id: string) {

@@ -12,6 +12,7 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "seed:articles": "ts-node -r tsconfig-paths/register src/scripts/seed-articles.ts",
+    "reindex:articles": "ts-node -r tsconfig-paths/register src/scripts/reindex-articles.ts",
     "start:debug": "nest start --debug --watch",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
