@@ -6,6 +6,7 @@ import databaseConfig from '@core/config/database.config';
 import jwtConfig from '@core/config/jwt.config';
 import appConfig from '@core/config/app.config';
 import geminiConfig from '@core/config/gemini.config';
+import ragConfig from '@core/config/rag.config';
 import { CoreModule } from '@core/core.module';
 import { AuthModule } from '@core/auth/auth.module';
 import { UserModule } from '@modules/user/user.module';
@@ -22,7 +23,7 @@ import { HealthModule } from '@modules/health/health.module';
     imports: [
         ConfigModule.forRoot({
             isGlobal: true,
-            load: [databaseConfig, jwtConfig, appConfig, geminiConfig],
+            load: [databaseConfig, jwtConfig, appConfig, geminiConfig, ragConfig],
         }),
         ThrottlerModule.forRoot([
             {

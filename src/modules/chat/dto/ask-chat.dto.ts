@@ -1,11 +1,11 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class AskChatDto {
     @IsString()
     @IsNotEmpty()
     message!: string;
 
-    @IsString()
+    @IsUUID()
     @IsOptional()
     conversationId?: string;
 }

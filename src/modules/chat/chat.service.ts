@@ -1,9 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import { TicketService } from '@modules/ticket/ticket.service';
 import { TicketPriority } from '@common/enums/ticket-priority.enum';
 import { GeminiChatService } from './gemini-chat.service';
 import { ConversationHistoryProvider } from './history/conversation-history.provider';
+import { RagRetrieverService, RetrievedChunk } from './rag/rag-retriever.service';
+import { KnowledgeBaseInventoryService } from './rag/knowledge-base-inventory.service';
+import type {
+    KnowledgeBaseChunk,
+    KnowledgeBaseInventoryEntry,
+} from './prompts/knowledge-base';
 
 const DEFAULT_MAX_MESSAGE_CHARS = 4000;
 const TRUNCATION_SUFFIX = ' …[mensagem encurtada]';
@@ -11,6 +18,8 @@ const TRUNCATION_SUFFIX = ' …[mensagem encurtada]';
 interface ChatSource {
     id: string;
     title: string;
+    slug: string;
+    similarity: number;
 }
 
 export interface ChatAnswer {
@@ -30,7 +39,13 @@ export interface AskChatParams {
 
 export type ChatStreamEvent =
     | { type: 'token'; text: string }
-    | { type: 'meta'; shouldEscalate: boolean; escalatedTicketId?: string; conversationId: string }
+    | {
+          type: 'meta';
+          shouldEscalate: boolean;
+          escalatedTicketId?: string;
+          conversationId: string;
+          sources?: ChatSource[];
+      }
     | { type: 'done' }
     | { type: 'error'; message: string };
 
@@ -41,24 +56,68 @@ const ESCALATION_FIXED_REPLY =
 export class ChatService {
     private readonly logger = new Logger(ChatService.name);
     private readonly maxMessageChars: number;
+    private readonly ragEnabled: boolean;
 
     constructor(
         private readonly ticketService: TicketService,
         private readonly geminiChatService: GeminiChatService,
         private readonly historyProvider: ConversationHistoryProvider,
         private readonly configService: ConfigService,
+        private readonly ragRetriever: RagRetrieverService,
+        private readonly kbInventory: KnowledgeBaseInventoryService,
     ) {
         this.maxMessageChars =
             this.configService.get<number>('gemini.maxMessageChars') ?? DEFAULT_MAX_MESSAGE_CHARS;
+        this.ragEnabled = this.configService.get<boolean>('rag.enabled') ?? true;
+    }
+
+    private async retrieveKnowledge(
+        message: string,
+        requesterId: string,
+    ): Promise<RetrievedChunk[]> {
+        if (!this.ragEnabled) return [];
+        try {
+            return await this.ragRetriever.retrieve({ query: message, requesterId });
+        } catch (error) {
+            this.logger.warn(`Falha no RAG (continuando sem fontes): ${(error as Error).message}`);
+            return [];
+        }
+    }
+
+    private async loadInventory(): Promise<KnowledgeBaseInventoryEntry[]> {
+        if (!this.ragEnabled) return [];
+        try {
+            return await this.kbInventory.listPublished();
+        } catch (error) {
+            this.logger.warn(
+                `Falha ao carregar inventario da KB: ${(error as Error).message}`,
+            );
+            return [];
+        }
+    }
+
+    private toKnowledgeBase(chunks: RetrievedChunk[]): KnowledgeBaseChunk[] {
+        return chunks.map((c) => ({ title: c.title, slug: c.slug, content: c.content }));
+    }
+
+    private toSources(chunks: RetrievedChunk[]): ChatSource[] {
+        return chunks.map((c) => ({
+            id: c.articleId,
+            title: c.title,
+            slug: c.slug,
+            similarity: Number(c.similarity.toFixed(4)),
+        }));
     }
 
     async ask(params: AskChatParams): Promise<ChatAnswer> {
-        const conversationId = params.conversationId ?? this.generateConversationId();
+        const conversationId = this.resolveConversationId(params.conversationId);
         const originalMessage = params.message;
         const llmMessage = this.normalizeForLlm(originalMessage);
 
         if (this.hasEscalationHint(originalMessage)) {
+            await this.persistUserMessageSafe(conversationId, params.requesterId, originalMessage);
             const ticket = await this.escalate(params, conversationId, originalMessage);
+            await this.persistAssistantMessageSafe(conversationId, ESCALATION_FIXED_REPLY);
             return {
                 answer: ESCALATION_FIXED_REPLY,
                 sources: [],
@@ -68,18 +127,33 @@ export class ChatService {
             };
         }
 
-        const history = await this.historyProvider.get(conversationId);
+        await this.persistUserMessageSafe(conversationId, params.requesterId, originalMessage);
+
+        const history = await this.historyProvider.get(conversationId, params.requesterId);
+        const [retrieved, inventory] = await Promise.all([
+            this.retrieveKnowledge(llmMessage, params.requesterId),
+            this.loadInventory(),
+        ]);
+        const knowledgeBase = this.toKnowledgeBase(retrieved);
+        const sources = this.toSources(retrieved);
+
         const result = await this.geminiChatService.generateReply({
             message: llmMessage,
             history,
             user: { name: params.userName },
+            knowledgeBase,
+            knowledgeBaseInventory: inventory,
         });
+
+        if (!result.hadError && result.cleanText) {
+            await this.persistAssistantMessageSafe(conversationId, result.cleanText);
+        }
 
         if (result.shouldEscalate) {
             const ticket = await this.escalate(params, conversationId, originalMessage);
             return {
                 answer: result.cleanText,
-                sources: [],
+                sources,
                 shouldEscalate: true,
                 escalatedTicketId: ticket.id,
                 conversationId,
@@ -88,10 +162,51 @@ export class ChatService {
 
         return {
             answer: result.cleanText,
-            sources: [],
+            sources,
             shouldEscalate: false,
             conversationId,
         };
+    }
+
+    async listMessages(
+        conversationId: string,
+        requesterId: string,
+    ): Promise<Array<{ role: 'user' | 'assistant'; text: string; createdAt: Date }>> {
+        const rows = await this.historyProvider.listMessages(conversationId, requesterId, 50);
+        return rows.map((m) => ({
+            role: m.role,
+            text: m.content,
+            createdAt: m.createdAt,
+        }));
+    }
+
+    private async persistUserMessageSafe(
+        conversationId: string,
+        requesterId: string,
+        content: string,
+    ): Promise<void> {
+        try {
+            await this.historyProvider.saveUserMessage(conversationId, requesterId, content);
+        } catch (error) {
+            this.logger.error(
+                `Falha ao persistir mensagem do usuário (conversa ${conversationId})`,
+                error as Error,
+            );
+        }
+    }
+
+    private async persistAssistantMessageSafe(
+        conversationId: string,
+        content: string,
+    ): Promise<void> {
+        try {
+            await this.historyProvider.saveAssistantMessage(conversationId, content);
+        } catch (error) {
+            this.logger.error(
+                `Falha ao persistir resposta do assistente (conversa ${conversationId})`,
+                error as Error,
+            );
+        }
     }
 
     async streamAsk(
@@ -99,12 +214,14 @@ export class ChatService {
         onEvent: (event: ChatStreamEvent) => void,
         abortSignal?: AbortSignal,
     ): Promise<void> {
-        const conversationId = params.conversationId ?? this.generateConversationId();
+        const conversationId = this.resolveConversationId(params.conversationId);
         const originalMessage = params.message;
         const llmMessage = this.normalizeForLlm(originalMessage);
 
         if (this.hasEscalationHint(originalMessage)) {
+            await this.persistUserMessageSafe(conversationId, params.requesterId, originalMessage);
             onEvent({ type: 'token', text: ESCALATION_FIXED_REPLY });
+            await this.persistAssistantMessageSafe(conversationId, ESCALATION_FIXED_REPLY);
             try {
                 const ticket = await this.escalate(params, conversationId, originalMessage);
                 onEvent({
@@ -121,18 +238,33 @@ export class ChatService {
             return;
         }
 
-        const history = await this.historyProvider.get(conversationId);
+        await this.persistUserMessageSafe(conversationId, params.requesterId, originalMessage);
+
+        const history = await this.historyProvider.get(conversationId, params.requesterId);
+        const [retrieved, inventory] = await Promise.all([
+            this.retrieveKnowledge(llmMessage, params.requesterId),
+            this.loadInventory(),
+        ]);
+        const knowledgeBase = this.toKnowledgeBase(retrieved);
+        const sources = this.toSources(retrieved);
+
         const result = await this.geminiChatService.streamReply(
             {
                 message: llmMessage,
                 history,
                 user: { name: params.userName },
+                knowledgeBase,
+                knowledgeBaseInventory: inventory,
             },
             {
                 onToken: (text) => onEvent({ type: 'token', text }),
                 abortSignal,
             },
         );
+
+        if (!result.hadError && result.cleanText) {
+            await this.persistAssistantMessageSafe(conversationId, result.cleanText);
+        }
 
         let escalatedTicketId: string | undefined;
         if (result.shouldEscalate) {
@@ -149,6 +281,7 @@ export class ChatService {
             shouldEscalate: result.shouldEscalate,
             escalatedTicketId,
             conversationId,
+            sources,
         });
         onEvent({ type: 'done' });
     }
@@ -206,7 +339,23 @@ export class ChatService {
     }
 
     private generateConversationId(): string {
-        return `chat-${Date.now()}`;
+        return randomUUID();
+    }
+
+    private resolveConversationId(candidate?: string): string {
+        if (candidate && this.isUuid(candidate)) {
+            return candidate;
+        }
+        if (candidate) {
+            this.logger.warn(
+                `conversationId inválido recebido ("${candidate}"); gerando novo UUID`,
+            );
+        }
+        return this.generateConversationId();
+    }
+
+    private isUuid(value: string): boolean {
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
     }
 
     private normalizeForLlm(message: string): string {
