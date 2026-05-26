@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import { TicketService } from '@modules/ticket/ticket.service';
 import { TicketPriority } from '@common/enums/ticket-priority.enum';
 import { GeminiChatService } from './gemini-chat.service';
@@ -109,12 +110,14 @@ export class ChatService {
     }
 
     async ask(params: AskChatParams): Promise<ChatAnswer> {
-        const conversationId = params.conversationId ?? this.generateConversationId();
+        const conversationId = this.resolveConversationId(params.conversationId);
         const originalMessage = params.message;
         const llmMessage = this.normalizeForLlm(originalMessage);
 
         if (this.hasEscalationHint(originalMessage)) {
+            await this.persistUserMessageSafe(conversationId, params.requesterId, originalMessage);
             const ticket = await this.escalate(params, conversationId, originalMessage);
+            await this.persistAssistantMessageSafe(conversationId, ESCALATION_FIXED_REPLY);
             return {
                 answer: ESCALATION_FIXED_REPLY,
                 sources: [],
@@ -124,7 +127,9 @@ export class ChatService {
             };
         }
 
-        const history = await this.historyProvider.get(conversationId);
+        await this.persistUserMessageSafe(conversationId, params.requesterId, originalMessage);
+
+        const history = await this.historyProvider.get(conversationId, params.requesterId);
         const [retrieved, inventory] = await Promise.all([
             this.retrieveKnowledge(llmMessage, params.requesterId),
             this.loadInventory(),
@@ -139,6 +144,10 @@ export class ChatService {
             knowledgeBase,
             knowledgeBaseInventory: inventory,
         });
+
+        if (!result.hadError && result.cleanText) {
+            await this.persistAssistantMessageSafe(conversationId, result.cleanText);
+        }
 
         if (result.shouldEscalate) {
             const ticket = await this.escalate(params, conversationId, originalMessage);
@@ -159,17 +168,60 @@ export class ChatService {
         };
     }
 
+    async listMessages(
+        conversationId: string,
+        requesterId: string,
+    ): Promise<Array<{ role: 'user' | 'assistant'; text: string; createdAt: Date }>> {
+        const rows = await this.historyProvider.listMessages(conversationId, requesterId, 50);
+        return rows.map((m) => ({
+            role: m.role,
+            text: m.content,
+            createdAt: m.createdAt,
+        }));
+    }
+
+    private async persistUserMessageSafe(
+        conversationId: string,
+        requesterId: string,
+        content: string,
+    ): Promise<void> {
+        try {
+            await this.historyProvider.saveUserMessage(conversationId, requesterId, content);
+        } catch (error) {
+            this.logger.error(
+                `Falha ao persistir mensagem do usuário (conversa ${conversationId})`,
+                error as Error,
+            );
+        }
+    }
+
+    private async persistAssistantMessageSafe(
+        conversationId: string,
+        content: string,
+    ): Promise<void> {
+        try {
+            await this.historyProvider.saveAssistantMessage(conversationId, content);
+        } catch (error) {
+            this.logger.error(
+                `Falha ao persistir resposta do assistente (conversa ${conversationId})`,
+                error as Error,
+            );
+        }
+    }
+
     async streamAsk(
         params: AskChatParams,
         onEvent: (event: ChatStreamEvent) => void,
         abortSignal?: AbortSignal,
     ): Promise<void> {
-        const conversationId = params.conversationId ?? this.generateConversationId();
+        const conversationId = this.resolveConversationId(params.conversationId);
         const originalMessage = params.message;
         const llmMessage = this.normalizeForLlm(originalMessage);
 
         if (this.hasEscalationHint(originalMessage)) {
+            await this.persistUserMessageSafe(conversationId, params.requesterId, originalMessage);
             onEvent({ type: 'token', text: ESCALATION_FIXED_REPLY });
+            await this.persistAssistantMessageSafe(conversationId, ESCALATION_FIXED_REPLY);
             try {
                 const ticket = await this.escalate(params, conversationId, originalMessage);
                 onEvent({
@@ -186,7 +238,9 @@ export class ChatService {
             return;
         }
 
-        const history = await this.historyProvider.get(conversationId);
+        await this.persistUserMessageSafe(conversationId, params.requesterId, originalMessage);
+
+        const history = await this.historyProvider.get(conversationId, params.requesterId);
         const [retrieved, inventory] = await Promise.all([
             this.retrieveKnowledge(llmMessage, params.requesterId),
             this.loadInventory(),
@@ -207,6 +261,10 @@ export class ChatService {
                 abortSignal,
             },
         );
+
+        if (!result.hadError && result.cleanText) {
+            await this.persistAssistantMessageSafe(conversationId, result.cleanText);
+        }
 
         let escalatedTicketId: string | undefined;
         if (result.shouldEscalate) {
@@ -281,7 +339,23 @@ export class ChatService {
     }
 
     private generateConversationId(): string {
-        return `chat-${Date.now()}`;
+        return randomUUID();
+    }
+
+    private resolveConversationId(candidate?: string): string {
+        if (candidate && this.isUuid(candidate)) {
+            return candidate;
+        }
+        if (candidate) {
+            this.logger.warn(
+                `conversationId inválido recebido ("${candidate}"); gerando novo UUID`,
+            );
+        }
+        return this.generateConversationId();
+    }
+
+    private isUuid(value: string): boolean {
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
     }
 
     private normalizeForLlm(message: string): string {

@@ -1,4 +1,14 @@
-import { Body, Controller, Post, Res, UseGuards, Req } from '@nestjs/common';
+import {
+    Body,
+    Controller,
+    Get,
+    Param,
+    ParseUUIDPipe,
+    Post,
+    Req,
+    Res,
+    UseGuards,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '@core/auth/jwt-auth.guard';
@@ -22,6 +32,14 @@ export class ChatController {
             requesterId: req.user.userId,
             userName: req.user.name,
         });
+    }
+
+    @Get('conversations/:id/messages')
+    listMessages(
+        @Req() req: Request & { user: { userId: string } },
+        @Param('id', new ParseUUIDPipe()) id: string,
+    ) {
+        return this.chatService.listMessages(id, req.user.userId);
     }
 
     @Post('stream')
