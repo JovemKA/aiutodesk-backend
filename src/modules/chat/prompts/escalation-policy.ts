@@ -11,4 +11,5 @@ export const ESCALATION_POLICY = [
     '- Não inclua o bloco [[META]] quando NÃO for escalar.',
     '- O bloco [[META]] deve ser sempre a última linha; nada deve vir depois dele.',
     '- Não mencione o bloco [[META]] no texto da resposta ao usuário.',
+    '- Antes de emitir o bloco [[META]], finalize toda formatação Markdown aberta (fechar **, _, `, listas, blocos de código) e adicione uma quebra de linha em branco. Isso garante que o texto exibido ao usuário não fique com Markdown malformado.',
 ].join('\n');
