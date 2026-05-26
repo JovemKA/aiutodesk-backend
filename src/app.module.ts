@@ -16,6 +16,7 @@ import { TicketModule } from '@modules/ticket/ticket.module';
 import { AnalyticsModule } from '@modules/analytics/analytics.module';
 import { ChatModule } from '@modules/chat/chat.module';
 import { AccessRequestModule } from '@modules/access-request/access-request.module';
+import { HealthModule } from '@modules/health/health.module';
 
 @Module({
     imports: [
@@ -45,6 +46,7 @@ import { AccessRequestModule } from '@modules/access-request/access-request.modu
         AnalyticsModule,
         ChatModule,
         AccessRequestModule,
+        HealthModule,
     ],
     providers: [
         {
