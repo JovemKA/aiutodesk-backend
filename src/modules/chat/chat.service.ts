@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { TicketService } from '@modules/ticket/ticket.service';
+import { AiScoreFeedbackService } from '@modules/ticket/ai-score-feedback.service';
 import { TicketPriority } from '@common/enums/ticket-priority.enum';
 import { GeminiChatService } from './gemini-chat.service';
 import { ConversationHistoryProvider } from './history/conversation-history.provider';
@@ -65,6 +66,7 @@ export class ChatService {
         private readonly configService: ConfigService,
         private readonly ragRetriever: RagRetrieverService,
         private readonly kbInventory: KnowledgeBaseInventoryService,
+        private readonly aiScoreFeedback: AiScoreFeedbackService,
     ) {
         this.maxMessageChars =
             this.configService.get<number>('gemini.maxMessageChars') ?? DEFAULT_MAX_MESSAGE_CHARS;
@@ -92,6 +94,15 @@ export class ChatService {
             this.logger.warn(
                 `Falha ao carregar inventario da KB: ${(error as Error).message}`,
             );
+            return [];
+        }
+    }
+
+    private async loadFeedbackExamples() {
+        try {
+            return await this.aiScoreFeedback.getFeedbackExamples(5);
+        } catch (error) {
+            this.logger.warn(`Falha ao carregar exemplos de calibração: ${(error as Error).message}`);
             return [];
         }
     }
@@ -130,9 +141,10 @@ export class ChatService {
         await this.persistUserMessageSafe(conversationId, params.requesterId, originalMessage);
 
         const history = await this.historyProvider.get(conversationId, params.requesterId);
-        const [retrieved, inventory] = await Promise.all([
+        const [retrieved, inventory, feedbackExamples] = await Promise.all([
             this.retrieveKnowledge(llmMessage, params.requesterId),
             this.loadInventory(),
+            this.loadFeedbackExamples(),
         ]);
         const knowledgeBase = this.toKnowledgeBase(retrieved);
         const sources = this.toSources(retrieved);
@@ -143,6 +155,7 @@ export class ChatService {
             user: { name: params.userName },
             knowledgeBase,
             knowledgeBaseInventory: inventory,
+            scoreFeedbackExamples: feedbackExamples,
         });
 
         if (!result.hadError && result.cleanText) {
@@ -150,7 +163,14 @@ export class ChatService {
         }
 
         if (result.shouldEscalate) {
-            const ticket = await this.escalate(params, conversationId, originalMessage);
+            const ticket = await this.escalate(
+                params,
+                conversationId,
+                originalMessage,
+                result.priorityScore,
+                result.priorityReason,
+                result.scoreConfidence,
+            );
             return {
                 answer: result.cleanText,
                 sources,
@@ -241,9 +261,10 @@ export class ChatService {
         await this.persistUserMessageSafe(conversationId, params.requesterId, originalMessage);
 
         const history = await this.historyProvider.get(conversationId, params.requesterId);
-        const [retrieved, inventory] = await Promise.all([
+        const [retrieved, inventory, feedbackExamples] = await Promise.all([
             this.retrieveKnowledge(llmMessage, params.requesterId),
             this.loadInventory(),
+            this.loadFeedbackExamples(),
         ]);
         const knowledgeBase = this.toKnowledgeBase(retrieved);
         const sources = this.toSources(retrieved);
@@ -255,6 +276,7 @@ export class ChatService {
                 user: { name: params.userName },
                 knowledgeBase,
                 knowledgeBaseInventory: inventory,
+                scoreFeedbackExamples: feedbackExamples,
             },
             {
                 onToken: (text) => onEvent({ type: 'token', text }),
@@ -269,7 +291,14 @@ export class ChatService {
         let escalatedTicketId: string | undefined;
         if (result.shouldEscalate) {
             try {
-                const ticket = await this.escalate(params, conversationId, originalMessage);
+                const ticket = await this.escalate(
+                    params,
+                    conversationId,
+                    originalMessage,
+                    result.priorityScore,
+                    result.priorityReason,
+                    result.scoreConfidence,
+                );
                 escalatedTicketId = ticket.id;
             } catch (error) {
                 this.logger.error('Falha ao criar ticket por sinal do LLM', error as Error);
@@ -286,7 +315,14 @@ export class ChatService {
         onEvent({ type: 'done' });
     }
 
-    private async escalate(params: AskChatParams, conversationId: string, message: string) {
+    private async escalate(
+        params: AskChatParams,
+        conversationId: string,
+        message: string,
+        priorityScore?: number,
+        priorityReason?: string,
+        scoreConfidence?: string,
+    ) {
         const summary = this.buildConversationSummary(message);
         const inferredSubject = this.inferSubject(message);
         return this.ticketService.createFromChatEscalation({
@@ -295,6 +331,9 @@ export class ChatService {
             inferredSubject,
             summary,
             priority: TicketPriority.MEDIUM,
+            priorityScore,
+            priorityReason,
+            scoreConfidence,
         });
     }
 
