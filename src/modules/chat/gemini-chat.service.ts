@@ -26,6 +26,8 @@ export interface StreamResult {
     cleanText: string;
     shouldEscalate: boolean;
     reason?: string;
+    priorityScore?: number;
+    priorityReason?: string;
     hadError: boolean;
 }
 
@@ -83,6 +85,8 @@ export class GeminiChatService {
                 cleanText: parsed.cleanText || FALLBACK_MESSAGE,
                 shouldEscalate: parsed.shouldEscalate,
                 reason: parsed.reason,
+                priorityScore: parsed.priorityScore,
+                priorityReason: parsed.priorityReason,
                 hadError: false,
             };
         } catch (error) {
@@ -169,6 +173,8 @@ export class GeminiChatService {
                 cleanText: parsed.cleanText || FALLBACK_MESSAGE,
                 shouldEscalate: parsed.shouldEscalate,
                 reason: parsed.reason,
+                priorityScore: parsed.priorityScore,
+                priorityReason: parsed.priorityReason,
                 hadError: false,
             };
         } catch (error) {

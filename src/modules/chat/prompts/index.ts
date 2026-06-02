@@ -69,6 +69,8 @@ export interface ParsedLlmMeta {
     cleanText: string;
     shouldEscalate: boolean;
     reason?: string;
+    priorityScore?: number;
+    priorityReason?: string;
 }
 
 export function parseLlmMeta(rawText: string): ParsedLlmMeta {
@@ -86,11 +88,28 @@ export function parseLlmMeta(rawText: string): ParsedLlmMeta {
     const cleanText = rawText.slice(0, startIdx).trim();
 
     try {
-        const parsed = JSON.parse(jsonPart) as { shouldEscalate?: boolean; reason?: string };
+        const parsed = JSON.parse(jsonPart) as {
+            shouldEscalate?: boolean;
+            reason?: string;
+            priorityScore?: unknown;
+            priorityReason?: unknown;
+        };
+
+        const rawScore = parsed.priorityScore;
+        const priorityScore =
+            typeof rawScore === 'number' && Number.isFinite(rawScore) && rawScore >= 0 && rawScore <= 100
+                ? Math.round(rawScore)
+                : undefined;
+
+        const priorityReason =
+            typeof parsed.priorityReason === 'string' ? parsed.priorityReason : undefined;
+
         return {
             cleanText,
             shouldEscalate: Boolean(parsed.shouldEscalate),
             reason: parsed.reason,
+            priorityScore,
+            priorityReason,
         };
     } catch {
         return { cleanText, shouldEscalate: false };

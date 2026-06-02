@@ -150,7 +150,13 @@ export class ChatService {
         }
 
         if (result.shouldEscalate) {
-            const ticket = await this.escalate(params, conversationId, originalMessage);
+            const ticket = await this.escalate(
+                params,
+                conversationId,
+                originalMessage,
+                result.priorityScore,
+                result.priorityReason,
+            );
             return {
                 answer: result.cleanText,
                 sources,
@@ -269,7 +275,13 @@ export class ChatService {
         let escalatedTicketId: string | undefined;
         if (result.shouldEscalate) {
             try {
-                const ticket = await this.escalate(params, conversationId, originalMessage);
+                const ticket = await this.escalate(
+                    params,
+                    conversationId,
+                    originalMessage,
+                    result.priorityScore,
+                    result.priorityReason,
+                );
                 escalatedTicketId = ticket.id;
             } catch (error) {
                 this.logger.error('Falha ao criar ticket por sinal do LLM', error as Error);
@@ -286,7 +298,13 @@ export class ChatService {
         onEvent({ type: 'done' });
     }
 
-    private async escalate(params: AskChatParams, conversationId: string, message: string) {
+    private async escalate(
+        params: AskChatParams,
+        conversationId: string,
+        message: string,
+        priorityScore?: number,
+        priorityReason?: string,
+    ) {
         const summary = this.buildConversationSummary(message);
         const inferredSubject = this.inferSubject(message);
         return this.ticketService.createFromChatEscalation({
@@ -295,6 +313,8 @@ export class ChatService {
             inferredSubject,
             summary,
             priority: TicketPriority.MEDIUM,
+            priorityScore,
+            priorityReason,
         });
     }
 

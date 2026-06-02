@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { TicketPriority } from '@common/enums/ticket-priority.enum';
 import { TicketStatus } from '@common/enums/ticket-status.enum';
+import { scoreToPriority } from './utils/priority-score.utils';
 import { UserRole } from '@common/enums/user-role.enum';
 import { User } from '@modules/user/entities/user.entity';
 import { UserDepartment } from '@modules/user/entities/user-department.entity';
@@ -30,6 +31,8 @@ interface CreateChatEscalationInput {
     summary: string;
     conversationId: string;
     priority?: TicketPriority;
+    priorityScore?: number;
+    priorityReason?: string;
 }
 
 interface AssignableUserDto {
@@ -84,10 +87,17 @@ export class TicketService {
     }
 
     async createFromChatEscalation(input: CreateChatEscalationInput): Promise<Ticket> {
+        const resolvedPriority =
+            input.priorityScore !== undefined
+                ? scoreToPriority(input.priorityScore)
+                : (input.priority ?? TicketPriority.MEDIUM);
+
         const ticket = this.ticketRepo.create({
             title: input.inferredSubject,
             description: input.summary,
-            priority: input.priority ?? TicketPriority.MEDIUM,
+            priority: resolvedPriority,
+            priorityScore: input.priorityScore ?? null,
+            priorityReason: input.priorityReason ?? null,
             status: TicketStatus.OPEN,
             requester: { id: input.requesterId } as Ticket['requester'],
             assignedUser: null,
