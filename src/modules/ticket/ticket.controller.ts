@@ -97,6 +97,14 @@ export class TicketController {
         return this.ticketService.updateStatus(id, updateStatusDto, req.user);
     }
 
+    @Get(':id/events')
+    events(
+        @Req() req: Request & { user: { userId: string; role: UserRole } },
+        @Param('id') id: string,
+    ) {
+        return this.ticketService.findEvents(id, req.user);
+    }
+
     @Delete(':id')
     remove(
         @Req() req: Request & { user: { userId: string; role: UserRole } },
