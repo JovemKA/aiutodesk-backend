@@ -39,6 +39,9 @@ export class Ticket {
   @Column({ name: 'priority_reason', type: 'text', nullable: true })
   priorityReason!: string | null;
 
+  @Column({ name: 'score_confidence', type: 'varchar', length: 6, nullable: true })
+  scoreConfidence!: string | null;
+
   @Index()
   @ManyToOne(() => User, { nullable: false })
   @JoinColumn({ name: 'requester_id' })

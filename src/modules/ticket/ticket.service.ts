@@ -3,11 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { TicketPriority } from '@common/enums/ticket-priority.enum';
 import { TicketStatus } from '@common/enums/ticket-status.enum';
+import { TicketEventType } from '@common/enums/ticket-event-type.enum';
 import { scoreToPriority } from './utils/priority-score.utils';
 import { UserRole } from '@common/enums/user-role.enum';
 import { User } from '@modules/user/entities/user.entity';
 import { UserDepartment } from '@modules/user/entities/user-department.entity';
 import { Ticket } from './entities/ticket.entity';
+import { TicketEvent } from './entities/ticket-event.entity';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
@@ -33,6 +35,7 @@ interface CreateChatEscalationInput {
     priority?: TicketPriority;
     priorityScore?: number;
     priorityReason?: string;
+    scoreConfidence?: string;
 }
 
 interface AssignableUserDto {
@@ -47,6 +50,8 @@ export class TicketService {
     constructor(
         @InjectRepository(Ticket)
         private readonly ticketRepo: Repository<Ticket>,
+        @InjectRepository(TicketEvent)
+        private readonly eventRepo: Repository<TicketEvent>,
         @InjectRepository(UserDepartment)
         private readonly userDepartmentRepo: Repository<UserDepartment>,
         @InjectRepository(User)
@@ -98,6 +103,7 @@ export class TicketService {
             priority: resolvedPriority,
             priorityScore: input.priorityScore ?? null,
             priorityReason: input.priorityReason ?? null,
+            scoreConfidence: input.scoreConfidence ?? null,
             status: TicketStatus.OPEN,
             requester: { id: input.requesterId } as Ticket['requester'],
             assignedUser: null,
@@ -186,7 +192,23 @@ export class TicketService {
             ticket.description = dto.description;
         }
 
-        if (dto.priority !== undefined) {
+        if (dto.priority !== undefined && dto.priority !== ticket.priority) {
+            const previousPriority = ticket.priority;
+            ticket.priority = dto.priority;
+            await this.eventRepo.save(
+                this.eventRepo.create({
+                    ticket: { id } as Ticket,
+                    type: TicketEventType.PRIORITY_CHANGE,
+                    actor: actor.userId ? ({ id: actor.userId } as User) : null,
+                    metadata: {
+                        from: previousPriority,
+                        to: dto.priority,
+                        aiScore: ticket.priorityScore ?? undefined,
+                        aiScoreConfidence: ticket.scoreConfidence ?? undefined,
+                    },
+                }),
+            );
+        } else if (dto.priority !== undefined) {
             ticket.priority = dto.priority;
         }
 
@@ -273,6 +295,15 @@ export class TicketService {
 
         await this.ticketRepo.save(ticket);
         return this.findOne(id, actor);
+    }
+
+    async findEvents(id: string, actor: TicketActor): Promise<TicketEvent[]> {
+        await this.findOne(id, actor);
+        return this.eventRepo.find({
+            where: { ticket: { id } },
+            relations: { actor: true },
+            order: { createdAt: 'ASC' },
+        });
     }
 
     async remove(id: string, actor: TicketActor): Promise<void> {

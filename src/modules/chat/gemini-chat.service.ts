@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
-import { buildSystemInstruction, parseLlmMeta, META_OPEN_TAG, UserContextInput } from './prompts';
+import { buildSystemInstruction, parseLlmMeta, META_OPEN_TAG, UserContextInput, CalibrationExample, ScoreConfidence } from './prompts';
 import type { KnowledgeBaseChunk, KnowledgeBaseInventoryEntry } from './prompts/knowledge-base';
 import { ChatTurn } from './history/conversation-history.provider';
 import { GeminiClientProvider } from './embeddings/gemini-client.provider';
@@ -15,7 +15,10 @@ export interface GenerateParams {
     user?: UserContextInput;
     knowledgeBase?: KnowledgeBaseChunk[];
     knowledgeBaseInventory?: KnowledgeBaseInventoryEntry[];
+    scoreFeedbackExamples?: CalibrationExample[];
 }
+
+export type { ScoreConfidence };
 
 export interface StreamCallbacks {
     onToken: (chunk: string) => void;
@@ -28,6 +31,7 @@ export interface StreamResult {
     reason?: string;
     priorityScore?: number;
     priorityReason?: string;
+    scoreConfidence?: ScoreConfidence;
     hadError: boolean;
 }
 
@@ -76,6 +80,7 @@ export class GeminiChatService {
                     params.user,
                     params.knowledgeBase,
                     params.knowledgeBaseInventory,
+                    params.scoreFeedbackExamples,
                 ),
             });
 
@@ -87,6 +92,7 @@ export class GeminiChatService {
                 reason: parsed.reason,
                 priorityScore: parsed.priorityScore,
                 priorityReason: parsed.priorityReason,
+                scoreConfidence: parsed.scoreConfidence,
                 hadError: false,
             };
         } catch (error) {
@@ -124,6 +130,7 @@ export class GeminiChatService {
                     params.user,
                     params.knowledgeBase,
                     params.knowledgeBaseInventory,
+                    params.scoreFeedbackExamples,
                 ),
             });
 
@@ -175,6 +182,7 @@ export class GeminiChatService {
                 reason: parsed.reason,
                 priorityScore: parsed.priorityScore,
                 priorityReason: parsed.priorityReason,
+                scoreConfidence: parsed.scoreConfidence,
                 hadError: false,
             };
         } catch (error) {
@@ -212,6 +220,7 @@ export class GeminiChatService {
         user?: UserContextInput,
         knowledgeBase?: KnowledgeBaseChunk[],
         knowledgeBaseInventory?: KnowledgeBaseInventoryEntry[],
+        scoreFeedbackExamples?: CalibrationExample[],
     ) {
         return {
             systemInstruction: buildSystemInstruction({
@@ -219,6 +228,7 @@ export class GeminiChatService {
                 user,
                 knowledgeBase,
                 knowledgeBaseInventory,
+                scoreFeedbackExamples,
             }),
             temperature: this.temperature,
             topP: this.topP,

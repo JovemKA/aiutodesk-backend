@@ -1,0 +1,6 @@
+export enum TicketEventType {
+    STATUS_CHANGE = 'STATUS_CHANGE',
+    PRIORITY_CHANGE = 'PRIORITY_CHANGE',
+    ASSIGNED = 'ASSIGNED',
+    NOTE = 'NOTE',
+}
