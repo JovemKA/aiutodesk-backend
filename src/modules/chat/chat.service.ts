@@ -188,6 +188,35 @@ export class ChatService {
         };
     }
 
+    async listConversations(
+        userId: string,
+        opts: { archived?: boolean; limit?: number; offset?: number } = {},
+    ) {
+        return this.historyProvider.listConversations(userId, opts);
+    }
+
+    async updateConversation(
+        id: string,
+        userId: string,
+        dto: { title?: string; archived?: boolean },
+    ): Promise<{ found: boolean }> {
+        let found = true;
+        if (dto.title !== undefined) {
+            const ok = await this.historyProvider.renameConversation(id, userId, dto.title);
+            if (!ok) found = false;
+        }
+        if (dto.archived !== undefined) {
+            const ok = await this.historyProvider.setArchived(id, userId, dto.archived);
+            if (!ok) found = false;
+        }
+        return { found };
+    }
+
+    async deleteConversation(id: string, userId: string): Promise<{ found: boolean }> {
+        const found = await this.historyProvider.deleteConversation(id, userId);
+        return { found };
+    }
+
     async listMessages(
         conversationId: string,
         requesterId: string,
