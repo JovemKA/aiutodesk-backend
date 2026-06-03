@@ -12,6 +12,7 @@ import {
 
 @Entity('chat_conversations')
 @Index(['userId', 'lastMessageAt'])
+@Index(['userId', 'archivedAt', 'lastMessageAt'])
 export class ChatConversation {
     @PrimaryGeneratedColumn('uuid')
     id!: string;
@@ -35,4 +36,7 @@ export class ChatConversation {
 
     @Column({ name: 'last_message_at', type: 'timestamp', nullable: true })
     lastMessageAt!: Date | null;
+
+    @Column({ name: 'archived_at', type: 'timestamptz', nullable: true, default: null })
+    archivedAt!: Date | null;
 }
