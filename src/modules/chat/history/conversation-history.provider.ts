@@ -120,6 +120,53 @@ export class ConversationHistoryProvider {
         return rows.reverse();
     }
 
+    async listConversations(
+        userId: string,
+        opts: { archived?: boolean; limit?: number; offset?: number } = {},
+    ): Promise<ChatConversation[]> {
+        const { archived = false, limit = 30, offset = 0 } = opts;
+        const qb = this.conversationRepo
+            .createQueryBuilder('conv')
+            .where('conv.userId = :userId', { userId });
+
+        if (archived) {
+            qb.andWhere('conv.archivedAt IS NOT NULL');
+        } else {
+            qb.andWhere('conv.archivedAt IS NULL');
+        }
+
+        return qb
+            .orderBy('conv.lastMessageAt', 'DESC', 'NULLS LAST')
+            .limit(Math.min(limit, 50))
+            .offset(offset)
+            .getMany();
+    }
+
+    async setArchived(id: string, userId: string, archived: boolean): Promise<boolean> {
+        const conv = await this.conversationRepo.findOne({ where: { id, userId } });
+        if (!conv) return false;
+        conv.archivedAt = archived ? new Date() : null;
+        await this.conversationRepo.save(conv);
+        return true;
+    }
+
+    async renameConversation(id: string, userId: string, title: string): Promise<boolean> {
+        const conv = await this.conversationRepo.findOne({ where: { id, userId } });
+        if (!conv) return false;
+        const trimmed = title.trim().slice(0, 200);
+        if (!trimmed) return false;
+        conv.title = trimmed;
+        await this.conversationRepo.save(conv);
+        return true;
+    }
+
+    async deleteConversation(id: string, userId: string): Promise<boolean> {
+        const conv = await this.conversationRepo.findOne({ where: { id, userId } });
+        if (!conv) return false;
+        await this.conversationRepo.remove(conv);
+        return true;
+    }
+
     private buildTitle(content: string): string {
         const flat = content.replace(/\s+/g, ' ').trim();
         if (flat.length <= TITLE_MAX_CHARS) return flat;

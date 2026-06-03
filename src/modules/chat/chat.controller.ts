@@ -1,10 +1,14 @@
 import {
     Body,
     Controller,
+    Delete,
     Get,
+    NotFoundException,
     Param,
     ParseUUIDPipe,
+    Patch,
     Post,
+    Query,
     Req,
     Res,
     UseGuards,
@@ -14,6 +18,8 @@ import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '@core/auth/jwt-auth.guard';
 import { ChatService, ChatStreamEvent } from './chat.service';
 import { AskChatDto } from './dto/ask-chat.dto';
+import { ListConversationsQueryDto } from './dto/list-conversations-query.dto';
+import { UpdateConversationDto } from './dto/update-conversation.dto';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
@@ -32,6 +38,43 @@ export class ChatController {
             requesterId: req.user.userId,
             userName: req.user.name,
         });
+    }
+
+    @Get('conversations')
+    listConversations(
+        @Req() req: Request & { user: { userId: string } },
+        @Query() query: ListConversationsQueryDto,
+    ) {
+        return this.chatService.listConversations(req.user.userId, {
+            archived: query.archived,
+            limit: query.limit,
+            offset: query.offset,
+        });
+    }
+
+    @Patch('conversations/:id')
+    async updateConversation(
+        @Req() req: Request & { user: { userId: string } },
+        @Param('id', new ParseUUIDPipe()) id: string,
+        @Body() dto: UpdateConversationDto,
+    ) {
+        const result = await this.chatService.updateConversation(id, req.user.userId, dto);
+        if (!result.found) {
+            throw new NotFoundException(`Conversa ${id} não encontrada.`);
+        }
+        return { success: true };
+    }
+
+    @Delete('conversations/:id')
+    async deleteConversation(
+        @Req() req: Request & { user: { userId: string } },
+        @Param('id', new ParseUUIDPipe()) id: string,
+    ) {
+        const result = await this.chatService.deleteConversation(id, req.user.userId);
+        if (!result.found) {
+            throw new NotFoundException(`Conversa ${id} não encontrada.`);
+        }
+        return { success: true };
     }
 
     @Get('conversations/:id/messages')
