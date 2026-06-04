@@ -23,12 +23,18 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
+import { CreateTicketMessageDto } from './dto/create-ticket-message.dto';
+import { AssistTicketDto } from './dto/assist-ticket.dto';
+import { TicketAssistService } from './assist/ticket-assist.service';
 
 @Controller('tickets')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.DEV, UserRole.MASTER, UserRole.ADMIN)
 export class TicketController {
-    constructor(private readonly ticketService: TicketService) {}
+    constructor(
+        private readonly ticketService: TicketService,
+        private readonly ticketAssistService: TicketAssistService,
+    ) {}
 
     @Post()
     create(
@@ -103,6 +109,35 @@ export class TicketController {
         @Param('id') id: string,
     ) {
         return this.ticketService.findEvents(id, req.user);
+    }
+
+    @Get(':id/messages')
+    messages(
+        @Req() req: Request & { user: { userId: string; role: UserRole } },
+        @Param('id') id: string,
+    ) {
+        return this.ticketService.listMessages(id, req.user);
+    }
+
+    @Post(':id/messages')
+    createMessage(
+        @Req() req: Request & { user: { userId: string; role: UserRole } },
+        @Param('id') id: string,
+        @Body() dto: CreateTicketMessageDto,
+    ) {
+        return this.ticketService.createMessage(id, dto, req.user);
+    }
+
+    @Post(':id/assist')
+    assist(
+        @Req() req: Request & { user: { userId: string; role: UserRole } },
+        @Param('id') id: string,
+        @Body() dto: AssistTicketDto,
+    ) {
+        return this.ticketAssistService.assist(
+            { ticketId: id, intent: dto.intent, query: dto.query },
+            req.user,
+        );
     }
 
     @Delete(':id')

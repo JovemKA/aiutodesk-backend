@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { TicketPriority } from '@common/enums/ticket-priority.enum';
@@ -10,10 +10,13 @@ import { User } from '@modules/user/entities/user.entity';
 import { UserDepartment } from '@modules/user/entities/user-department.entity';
 import { Ticket } from './entities/ticket.entity';
 import { TicketEvent } from './entities/ticket-event.entity';
+import { TicketMessage, TicketMessageAttachment } from './entities/ticket-message.entity';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
+import { CreateTicketMessageDto } from './dto/create-ticket-message.dto';
+import { TicketCommentIndexerService } from './indexing/ticket-comment-indexer.service';
 
 interface TicketFilters {
     status?: TicketStatus;
@@ -45,17 +48,33 @@ interface AssignableUserDto {
     role: UserRole;
 }
 
+export interface TicketMessageDto {
+    id: string;
+    ticketId: string;
+    authorId: string | null;
+    authorRole: 'requester' | 'agent' | 'system';
+    body: string;
+    createdAt: string;
+    internalNote: boolean;
+    attachments?: TicketMessageAttachment[];
+}
+
 @Injectable()
 export class TicketService {
+    private readonly logger = new Logger(TicketService.name);
+
     constructor(
         @InjectRepository(Ticket)
         private readonly ticketRepo: Repository<Ticket>,
         @InjectRepository(TicketEvent)
         private readonly eventRepo: Repository<TicketEvent>,
+        @InjectRepository(TicketMessage)
+        private readonly messageRepo: Repository<TicketMessage>,
         @InjectRepository(UserDepartment)
         private readonly userDepartmentRepo: Repository<UserDepartment>,
         @InjectRepository(User)
         private readonly userRepo: Repository<User>,
+        private readonly commentIndexer: TicketCommentIndexerService,
     ) {}
 
     async create(dto: CreateTicketDto, requesterId: string, role: UserRole): Promise<Ticket> {
@@ -284,6 +303,7 @@ export class TicketService {
 
     async updateStatus(id: string, updateStatusDto: UpdateStatusDto, actor: TicketActor): Promise<Ticket> {
         const ticket = await this.findOne(id, actor);
+        const previousStatus = ticket.status;
         ticket.status = updateStatusDto.status;
 
         if (
@@ -294,6 +314,18 @@ export class TicketService {
         }
 
         await this.ticketRepo.save(ticket);
+
+        if (updateStatusDto.status !== previousStatus) {
+            await this.eventRepo.save(
+                this.eventRepo.create({
+                    ticket: { id } as Ticket,
+                    type: TicketEventType.STATUS_CHANGE,
+                    actor: actor.userId ? ({ id: actor.userId } as User) : null,
+                    metadata: { from: previousStatus, to: updateStatusDto.status },
+                }),
+            );
+        }
+
         return this.findOne(id, actor);
     }
 
@@ -304,6 +336,83 @@ export class TicketService {
             relations: { actor: true },
             order: { createdAt: 'ASC' },
         });
+    }
+
+    async listMessages(id: string, actor: TicketActor): Promise<TicketMessageDto[]> {
+        const ticket = await this.findOne(id, actor);
+        const messages = await this.messageRepo.find({
+            where: { ticket: { id } },
+            relations: { author: true },
+            order: { createdAt: 'ASC' },
+        });
+
+        return messages.map((message) => this.toMessageDto(message, ticket));
+    }
+
+    async createMessage(
+        id: string,
+        dto: CreateTicketMessageDto,
+        actor: TicketActor,
+    ): Promise<TicketMessageDto> {
+        const ticket = await this.findOne(id, actor);
+        const internalNote = dto.internalNote ?? false;
+
+        const saved = await this.messageRepo.save(
+            this.messageRepo.create({
+                ticket: { id } as Ticket,
+                author: { id: actor.userId } as User,
+                body: dto.body,
+                internalNote,
+                attachments: null,
+            }),
+        );
+
+        await this.eventRepo.save(
+            this.eventRepo.create({
+                ticket: { id } as Ticket,
+                type: internalNote ? TicketEventType.NOTE : TicketEventType.REPLY,
+                actor: actor.userId ? ({ id: actor.userId } as User) : null,
+                metadata: { messageId: saved.id, internalNote },
+            }),
+        );
+
+        // Indexa o comentário no RAG escopado (somente público), em background e best-effort.
+        if (!internalNote) {
+            void this.commentIndexer
+                .indexComment(saved.id)
+                .catch((error) =>
+                    this.logger.warn(
+                        `Falha ao indexar comentário ${saved.id} no RAG: ${(error as Error).message}`,
+                    ),
+                );
+        }
+
+        // Recarrega com o autor para mapear o DTO; o ticket já vem de findOne.
+        const persisted = await this.messageRepo.findOne({
+            where: { id: saved.id },
+            relations: { author: true },
+        });
+
+        return this.toMessageDto(persisted ?? saved, ticket);
+    }
+
+    private toMessageDto(message: TicketMessage, ticket: Ticket): TicketMessageDto {
+        const authorId = message.author?.id ?? null;
+        let authorRole: TicketMessageDto['authorRole'] = 'system';
+        if (authorId) {
+            authorRole = authorId === ticket.requester?.id ? 'requester' : 'agent';
+        }
+
+        return {
+            id: message.id,
+            ticketId: ticket.id,
+            authorId,
+            authorRole,
+            body: message.body,
+            createdAt: message.createdAt.toISOString(),
+            internalNote: message.internalNote,
+            attachments: message.attachments ?? undefined,
+        };
     }
 
     async remove(id: string, actor: TicketActor): Promise<void> {
