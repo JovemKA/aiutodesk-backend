@@ -3,4 +3,5 @@ export enum TicketEventType {
     PRIORITY_CHANGE = 'PRIORITY_CHANGE',
     ASSIGNED = 'ASSIGNED',
     NOTE = 'NOTE',
+    REPLY = 'REPLY',
 }
