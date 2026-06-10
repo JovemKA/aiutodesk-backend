@@ -1,3 +1,5 @@
+import { PRIORITY_SCORE_LEVELS } from '@common/constants/priority-rubric';
+
 export const ESCALATION_POLICY = [
     'Política de escalonamento:',
     '- Se o caso parecer incidente, urgência, impacto alto, abertura de chamado ou pedido de humano, oriente o escalonamento.',
@@ -17,10 +19,7 @@ export const ESCALATION_POLICY = [
     '',
     'Avaliação de prioridade (obrigatória ao escalar):',
     'Ao decidir escalar, atribua um score de 0 a 100 e um nível de confiança:',
-    '- 75–100 (critical): Bloqueio total de operação, sistema de produção fora do ar, segurança ou dados comprometidos, múltiplos usuários impedidos de trabalhar.',
-    '- 50–74 (high): Funcionalidade crítica degradada, grupo de usuários afetado, prazo iminente, alternativa temporária insatisfatória.',
-    '- 25–49 (medium): Impacto moderado em um ou poucos usuários, alternativa temporária disponível, sem risco imediato.',
-    '- 0–24 (low): Dúvida, melhoria cosmética, sem impacto operacional, pedido não urgente.',
+    ...PRIORITY_SCORE_LEVELS,
     'Confiança do score (scoreConfidence):',
     '- "high": 3 ou 4 dimensões diagnósticas conhecidas.',
     '- "medium": exatamente 2 dimensões conhecidas.',
