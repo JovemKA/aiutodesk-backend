@@ -17,6 +17,8 @@ import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { CreateTicketMessageDto } from './dto/create-ticket-message.dto';
 import { TicketCommentIndexerService } from './indexing/ticket-comment-indexer.service';
+import { TicketTriageService } from './triage/ticket-triage.service';
+import { TriageSuggestion } from './triage/triage.types';
 
 interface TicketFilters {
     status?: TicketStatus;
@@ -75,6 +77,7 @@ export class TicketService {
         @InjectRepository(User)
         private readonly userRepo: Repository<User>,
         private readonly commentIndexer: TicketCommentIndexerService,
+        private readonly triageService: TicketTriageService,
     ) {}
 
     async create(dto: CreateTicketDto, requesterId: string, role: UserRole): Promise<Ticket> {
@@ -107,7 +110,72 @@ export class TicketService {
         });
 
         const savedTicket = await this.ticketRepo.save(ticket);
+        this.scheduleTriageOnCreate(savedTicket.id, dto);
         return this.findOne(savedTicket.id, { userId: requesterId, role });
+    }
+
+    /**
+     * Triagem por IA, best-effort e NÃO bloqueante: dispara depois de salvar e não atrasa nem
+     * derruba a criação do chamado. Erros são apenas logados.
+     */
+    private scheduleTriageOnCreate(ticketId: string, dto: CreateTicketDto): void {
+        if (!this.triageService.isEnabledOnCreate()) {
+            return;
+        }
+        void this.runTriageOnCreate(ticketId, dto).catch((error) =>
+            this.logger.warn(
+                `Triagem por IA falhou para o chamado ${ticketId}: ${(error as Error).message}`,
+            ),
+        );
+    }
+
+    /** Executa a triagem e aplica o resultado. Separado para ser testável de forma determinística. */
+    async runTriageOnCreate(ticketId: string, dto: CreateTicketDto): Promise<void> {
+        const suggestion = await this.triageService.triage({
+            title: dto.title,
+            description: dto.description,
+        });
+        await this.applyTriage(ticketId, dto, suggestion);
+    }
+
+    /**
+     * Aplica a sugestão respeitando a escolha do usuário:
+     * - Score da IA é SEMPRE registrado (rastreamento), sem alterar a `priority` escolhida.
+     * - Categoria/Departamento só são preenchidos quando vieram VAZIOS no DTO e a confiança é ≥ medium.
+     */
+    private async applyTriage(
+        ticketId: string,
+        dto: CreateTicketDto,
+        suggestion: TriageSuggestion,
+    ): Promise<void> {
+        const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+        if (!ticket) {
+            return;
+        }
+
+        const confident = suggestion.confidence === 'medium' || suggestion.confidence === 'high';
+        let changed = false;
+
+        if (suggestion.priorityScore !== null) {
+            ticket.priorityScore = suggestion.priorityScore;
+            ticket.priorityReason = suggestion.priorityReason;
+            ticket.scoreConfidence = suggestion.confidence;
+            changed = true;
+        }
+
+        if (!dto.category_id && confident && suggestion.categoryId) {
+            ticket.category = { id: suggestion.categoryId } as Ticket['category'];
+            changed = true;
+        }
+
+        if (!dto.department_id && confident && suggestion.departmentId) {
+            ticket.department = { id: suggestion.departmentId } as Ticket['department'];
+            changed = true;
+        }
+
+        if (changed) {
+            await this.ticketRepo.save(ticket);
+        }
     }
 
     async createFromChatEscalation(input: CreateChatEscalationInput): Promise<Ticket> {

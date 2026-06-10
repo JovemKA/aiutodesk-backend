@@ -12,7 +12,10 @@ import { AiScoreFeedbackService } from './ai-score-feedback.service';
 import { TicketCommentIndexerService } from './indexing/ticket-comment-indexer.service';
 import { TicketCommentRetrieverService } from './rag/ticket-comment-retriever.service';
 import { TicketAssistService } from './assist/ticket-assist.service';
+import { TicketTriageService } from './triage/ticket-triage.service';
 import { EmbeddingsModule } from '@modules/chat/embeddings/embeddings.module';
+import { CategoryModule } from '@modules/category/category.module';
+import { DepartmentModule } from '@modules/department/department.module';
 
 @Module({
     imports: [
@@ -25,6 +28,8 @@ import { EmbeddingsModule } from '@modules/chat/embeddings/embeddings.module';
             User,
         ]),
         EmbeddingsModule,
+        CategoryModule,
+        DepartmentModule,
     ],
     controllers: [TicketController],
     providers: [
@@ -33,6 +38,7 @@ import { EmbeddingsModule } from '@modules/chat/embeddings/embeddings.module';
         TicketCommentIndexerService,
         TicketCommentRetrieverService,
         TicketAssistService,
+        TicketTriageService,
     ],
     exports: [TicketService, AiScoreFeedbackService, TicketCommentIndexerService],
 })
